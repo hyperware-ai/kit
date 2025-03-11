@@ -136,7 +136,6 @@ async fn execute(
     usage: clap::builder::StyledStr,
     matches: Option<(&str, &clap::ArgMatches)>,
 ) -> Result<()> {
-    println!("execute");
     match matches {
         Some(("boot-fake-node", matches)) => {
             let runtime_path = matches
@@ -1277,7 +1276,6 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
 #[instrument(level = "trace", skip_all)]
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("main");
     let log_path =
         std::env::var("KIT_LOG_PATH").unwrap_or_else(|_| KIT_LOG_PATH_DEFAULT.to_string());
     let log_path = PathBuf::from(log_path);
@@ -1290,13 +1288,9 @@ async fn main() -> Result<()> {
         .into_os_string();
     let mut app = make_app(&current_dir).await?;
 
-    println!("main a");
     let usage = app.render_usage();
-    println!("main b");
     let matches = app.get_matches();
-    println!("main c");
     let matches = matches.subcommand();
-    println!("main d");
 
     let result = match execute(usage, matches).await {
         Ok(()) => Ok(()),
