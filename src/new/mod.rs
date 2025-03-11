@@ -235,7 +235,7 @@ fn replace_vars(
         .to_string()
 }
 
-pub fn is_kimap_safe(input: &str, is_publisher: bool) -> bool {
+pub fn is_hypermap_safe(input: &str, is_publisher: bool) -> bool {
     let expression = if is_publisher {
         r"^[a-z0-9\-.]+$"
     } else {
@@ -280,7 +280,7 @@ pub fn execute(
         ));
     }
 
-    if !is_kimap_safe(&package_name, false) {
+    if !is_hypermap_safe(&package_name, false) {
         let error = if !is_from_dir {
             eyre!(
                 "`package_name` '{}' must be Kimap safe (a-z, 0-9, - allowed).",
@@ -295,7 +295,7 @@ pub fn execute(
         };
         return Err(error);
     }
-    if !is_kimap_safe(&publisher, true) {
+    if !is_hypermap_safe(&publisher, true) {
         return Err(eyre!(
             "`publisher` '{}' must be Kimap safe (a-z, 0-9, -, . allowed).",
             publisher

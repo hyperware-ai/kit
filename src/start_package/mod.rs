@@ -8,7 +8,7 @@ use tracing::{debug, info, instrument};
 use hyperware_process_lib::kernel_types::{Erc721Metadata, PackageManifestEntry};
 
 use crate::build::{hash_zip_pkg, make_pkg_publisher, make_zip_filename, read_and_update_metadata};
-use crate::new::is_kimap_safe;
+use crate::new::is_hypermap_safe;
 use crate::publish::{make_local_file_link_path, make_remote_link};
 use crate::{inject_message, KIT_LOG_PATH_DEFAULT};
 
@@ -105,12 +105,12 @@ fn check_manifest(pkg_dir: &Path, manifest_file_name: &str) -> Result<()> {
                     entry.process_wasm_path,
                 )
             })?;
-        if !is_kimap_safe(file_name, false) {
+        if !is_hypermap_safe(file_name, false) {
             return Err(eyre!(
                 "{manifest_json} file name '{file_name}' must be Kimap safe (a-z, 0-9, - allowed)"
             ));
         }
-        if !is_kimap_safe(file_path, false) {
+        if !is_hypermap_safe(file_path, false) {
             return Err(eyre!(
                 "{manifest_json} file path {:?} must be Kimap safe (a-z, 0-9, - allowed)",
                 entry.process_wasm_path,
