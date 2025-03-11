@@ -21,7 +21,7 @@ use tracing::{info, instrument};
 use hyperware_process_lib::kernel_types::Erc721Metadata;
 
 use crate::build::{download_file, make_pkg_publisher, read_and_update_metadata, zip_pkg};
-use crate::new::is_kimap_safe;
+use crate::new::is_hypermap_safe;
 
 sol! {
     function mint (
@@ -68,10 +68,10 @@ sol! {
 }
 
 const FAKE_KIMAP_ADDRESS: &str = "0xEce71a05B36CA55B895427cD9a440eEF7Cf3669D";
-const REAL_KIMAP_ADDRESS: &str = "0x000000000033e5CCbC52Ec7BDa87dB768f9aA93F";
+const REAL_KIMAP_ADDRESS: &str = "0x000000000044C6B8Cb4d8f0F889a3E47664EAeda";
 
 const FAKE_KINO_ACCOUNT_IMPL: &str = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
-const REAL_KINO_ACCOUNT_IMPL: &str = "0x83119A31628F2c19f578b0CAC9A43eAbA8d8512b";
+const REAL_KINO_ACCOUNT_IMPL: &str = "0x0000000000691b70A051CFAF82F9622E150369f3";
 
 const REAL_CHAIN_ID: u64 = 8453;
 const FAKE_CHAIN_ID: u64 = 31337;
@@ -206,7 +206,7 @@ fn check_pkg_hash(metadata: &Erc721Metadata, package_dir: &Path, metadata_uri: &
 fn make_multicall(
     metadata_uri: &str,
     metadata_hash: &str,
-    kimap: Address,
+    hypermap: Address,
     multicall_address: Address,
 ) -> Vec<u8> {
     // Create metadata calls
@@ -223,11 +223,11 @@ fn make_multicall(
 
     let calls = vec![
         Call {
-            target: kimap,
+            target: hypermap,
             callData: metadata_hash_call.into(),
         },
         Call {
-            target: kimap,
+            target: hypermap,
             callData: metadata_uri_call.into(),
         },
     ];
@@ -246,14 +246,14 @@ fn make_multicall(
 }
 
 #[instrument(level = "trace", skip_all)]
-async fn kimap_get(
+async fn hypermap_get(
     node: &str,
-    kimap: Address,
+    hypermap: Address,
     provider: &RootProvider<PubSubFrontend>,
 ) -> Result<(Address, Address, Option<Bytes>)> {
     let node = namehash(&node);
     let get_tx = TransactionRequest::default()
-        .to(kimap)
+        .to(hypermap)
         .input(getCall { node: node.into() }.abi_encode().into());
 
     let get_call = provider.call(&get_tx).await?;
@@ -270,11 +270,11 @@ async fn kimap_get(
 }
 
 #[instrument(level = "trace", skip_all)]
-async fn prepare_kimap_put(
+async fn prepare_hypermap_put(
     multicall: Vec<u8>,
     name: String,
     publisher: &str,
-    kimap: Address,
+    hypermap: Address,
     provider: &RootProvider<PubSubFrontend>,
     wallet_address: Address,
     kino_account_impl: Address,
@@ -282,13 +282,13 @@ async fn prepare_kimap_put(
     // if app_tba exists, update existing state;
     // else mint it & add new state
     let (app_tba, owner, _) =
-        kimap_get(&format!("{}.{}", name, publisher), kimap, &provider).await?;
+        hypermap_get(&format!("{}.{}", name, publisher), hypermap, &provider).await?;
     let is_update = app_tba != Address::default() && owner == wallet_address;
 
     let (to, call) = if is_update {
         (app_tba, multicall)
     } else {
-        let (publisher_tba, _, _) = kimap_get(&publisher, kimap, &provider).await?;
+        let (publisher_tba, _, _) = hypermap_get(&publisher, hypermap, &provider).await?;
         let mint_call = mintCall {
             who: wallet_address,
             label: name.into(),
@@ -297,7 +297,7 @@ async fn prepare_kimap_put(
         }
         .abi_encode();
         let call = executeCall {
-            to: kimap,
+            to: hypermap,
             value: U256::from(0),
             data: mint_call.into(),
             operation: 0,
@@ -347,12 +347,12 @@ pub async fn execute(
     let name = metadata.name.clone().unwrap();
     let publisher = metadata.properties.publisher.clone();
 
-    if !is_kimap_safe(&name, false) {
+    if !is_hypermap_safe(&name, false) {
         return Err(eyre!(
             "The App Store requires package names have only lowercase letters, digits, and `-`s"
         ));
     }
-    if !is_kimap_safe(&publisher, true) {
+    if !is_hypermap_safe(&publisher, true) {
         return Err(eyre!(
             "The App Store requires publisher names have only lowercase letters, digits, `-`s, and `.`s"
         ));
@@ -364,7 +364,7 @@ pub async fn execute(
     let ws = WsConnect::new(rpc_uri);
     let provider: RootProvider<PubSubFrontend> = ProviderBuilder::default().on_ws(ws).await?;
 
-    let kimap = Address::from_str(if *real {
+    let hypermap = Address::from_str(if *real {
         REAL_KIMAP_ADDRESS
     } else {
         FAKE_KIMAP_ADDRESS
@@ -378,22 +378,22 @@ pub async fn execute(
 
     let (to, call) = if *unpublish {
         let app_node = format!("{}.{}", name, publisher);
-        let (app_tba, owner, _) = kimap_get(&app_node, kimap, &provider).await?;
+        let (app_tba, owner, _) = hypermap_get(&app_node, hypermap, &provider).await?;
         let exists = app_tba != Address::default() && owner == wallet_address;
         if !exists {
             return Err(eyre!("Can't find {app_node} to unpublish."));
         }
 
-        let multicall = make_multicall("", "", kimap, multicall_address);
+        let multicall = make_multicall("", "", hypermap, multicall_address);
         (app_tba, multicall)
     } else {
-        let multicall = make_multicall(metadata_uri, &metadata_hash, kimap, multicall_address);
+        let multicall = make_multicall(metadata_uri, &metadata_hash, hypermap, multicall_address);
 
-        prepare_kimap_put(
+        prepare_hypermap_put(
             multicall,
             name.clone(),
             &publisher,
-            kimap,
+            hypermap,
             &provider,
             wallet_address,
             kino_account_impl,
