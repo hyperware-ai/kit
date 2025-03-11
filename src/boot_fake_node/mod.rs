@@ -174,10 +174,7 @@ pub fn get_platform_runtime_name(is_simulation_mode: bool) -> Result<String> {
 }
 
 #[instrument(level = "trace", skip_all)]
-async fn get_runtime_binary(
-    version: &str,
-    is_simulation_mode: bool,
-) -> Result<PathBuf> {
+async fn get_runtime_binary(version: &str, is_simulation_mode: bool) -> Result<PathBuf> {
     let zip_name = get_platform_runtime_name(is_simulation_mode)?;
 
     let version = if version != "latest" {
@@ -245,7 +242,6 @@ pub async fn get_or_build_runtime_binary(
     };
     Ok(runtime_path)
 }
-
 
 #[instrument(level = "trace", skip_all)]
 pub async fn get_from_github(owner: &str, repo: &str, endpoint: &str) -> Result<Vec<u8>> {
@@ -456,12 +452,7 @@ pub async fn execute(
     mut args: Vec<String>,
 ) -> Result<()> {
     let detached = false; // TODO: to argument?
-    let runtime_path = get_or_build_runtime_binary(
-        &version,
-        true,
-        runtime_path,
-        release,
-    ).await?;
+    let runtime_path = get_or_build_runtime_binary(&version, true, runtime_path, release).await?;
 
     let mut task_handles = Vec::new();
 
@@ -496,12 +487,7 @@ pub async fn execute(
     }
 
     // boot fakechain
-    let anvil_process = chain::start_chain(
-        fakechain_port,
-        recv_kill_in_start_chain,
-        false,
-    )
-    .await?;
+    let anvil_process = chain::start_chain(fakechain_port, recv_kill_in_start_chain, false).await?;
 
     if let Some(rpc) = rpc {
         args.extend_from_slice(&["--rpc".into(), rpc.into()]);

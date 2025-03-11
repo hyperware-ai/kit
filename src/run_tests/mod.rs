@@ -330,12 +330,8 @@ async fn build_packages(
 
     // boot fakechain
     let recv_kill_in_start_chain = send_to_kill.subscribe();
-    let anvil_process = chain::start_chain(
-        test.fakechain_router,
-        recv_kill_in_start_chain,
-        false,
-    )
-    .await?;
+    let anvil_process =
+        chain::start_chain(test.fakechain_router, recv_kill_in_start_chain, false).await?;
 
     boot_nodes(
         &nodes,
@@ -692,14 +688,8 @@ async fn handle_test(
     persist_home: bool,
     always_print_node_output: bool,
 ) -> Result<()> {
-    let (setup_packages, test_package_paths) = build_packages(
-        &test,
-        test_dir_path,
-        &detached,
-        &persist_home,
-        runtime_path,
-    )
-    .await?;
+    let (setup_packages, test_package_paths) =
+        build_packages(&test, test_dir_path, &detached, &persist_home, runtime_path).await?;
 
     let SetupCleanupReturn {
         send_to_cleanup,
@@ -737,12 +727,8 @@ async fn handle_test(
 
     // boot fakechain
     let recv_kill_in_start_chain = send_to_kill.subscribe();
-    let anvil_process = chain::start_chain(
-        test.fakechain_router,
-        recv_kill_in_start_chain,
-        false,
-    )
-    .await?;
+    let anvil_process =
+        chain::start_chain(test.fakechain_router, recv_kill_in_start_chain, false).await?;
 
     // Process each node
     boot_nodes(
@@ -814,19 +800,16 @@ pub async fn execute(config_path: PathBuf) -> Result<()> {
     debug!("{:?}", config);
 
     let (version, runtime_path) = match config.runtime {
-        Runtime::FetchVersion(version) => {
-            (version, None)
-        }
-        Runtime::RepoPath(runtime_path) => {
-            (String::new(), Some(runtime_path))
-        }
+        Runtime::FetchVersion(version) => (version, None),
+        Runtime::RepoPath(runtime_path) => (String::new(), Some(runtime_path)),
     };
     let runtime_path = boot_fake_node::get_or_build_runtime_binary(
         &version,
         true,
         runtime_path,
         config.runtime_build_release,
-    ).await?;
+    )
+    .await?;
 
     let test_dir_path = PathBuf::from(config_path).canonicalize()?;
     let test_dir_path = test_dir_path.parent().unwrap();

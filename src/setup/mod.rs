@@ -388,7 +388,7 @@ fn get_foundry_version() -> Result<(String, String)> {
 #[instrument(level = "trace", skip_all)]
 fn install_foundry(verbose: bool) -> Result<()> {
     let download_cmd = "curl -L https://foundry.paradigm.xyz | bash";
-    let install_cmd =  ". ~/.bashrc && foundryup";
+    let install_cmd = ". ~/.bashrc && foundryup";
     run_command(Command::new("bash").args(&["-c", download_cmd]), verbose)?;
     run_command(Command::new("bash").args(&["-c", install_cmd]), verbose)?;
 
@@ -479,9 +479,7 @@ pub async fn get_deps(
                         verbose,
                     )?,
                     Dependency::Rust => install_rust(verbose)?,
-                    Dependency::RustWasm32Wasi => {
-                        call_rustup("target add wasm32-wasip1", verbose)?
-                    }
+                    Dependency::RustWasm32Wasi => call_rustup("target add wasm32-wasip1", verbose)?,
                     Dependency::WasmTools => call_cargo("install wasm-tools", verbose)?,
                     Dependency::Foundry => install_foundry(verbose)?,
                     Dependency::Docker => {}

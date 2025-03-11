@@ -22,12 +22,7 @@ pub async fn execute(
     mut args: Vec<String>,
 ) -> Result<()> {
     let detached = false; // TODO: to argument?
-    let runtime_path = get_or_build_runtime_binary(
-        &version,
-        false,
-        runtime_path,
-        release,
-    ).await?;
+    let runtime_path = get_or_build_runtime_binary(&version, false, runtime_path, release).await?;
 
     let mut task_handles = Vec::new();
 
