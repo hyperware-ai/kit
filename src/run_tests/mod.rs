@@ -280,7 +280,6 @@ async fn build_packages(
     detached: &bool,
     persist_home: &bool,
     runtime_path: &Path,
-    version: &str,
 ) -> Result<(Vec<SetupPackage>, Vec<PathBuf>)> {
     let dependency_package_paths: Vec<PathBuf> = test
         .dependency_package_paths
@@ -331,11 +330,9 @@ async fn build_packages(
 
     // boot fakechain
     let recv_kill_in_start_chain = send_to_kill.subscribe();
-    let version = Some(version.parse()?);
     let anvil_process = chain::start_chain(
         test.fakechain_router,
         recv_kill_in_start_chain,
-        version,
         false,
     )
     .await?;
@@ -690,7 +687,6 @@ async fn run_tests(
 async fn handle_test(
     detached: bool,
     runtime_path: &Path,
-    version: &str,
     test: Test,
     test_dir_path: &Path,
     persist_home: bool,
@@ -702,7 +698,6 @@ async fn handle_test(
         &detached,
         &persist_home,
         runtime_path,
-        version,
     )
     .await?;
 
@@ -742,11 +737,9 @@ async fn handle_test(
 
     // boot fakechain
     let recv_kill_in_start_chain = send_to_kill.subscribe();
-    let version = Some(version.parse()?);
     let anvil_process = chain::start_chain(
         test.fakechain_router,
         recv_kill_in_start_chain,
-        version,
         false,
     )
     .await?;
@@ -820,47 +813,20 @@ pub async fn execute(config_path: PathBuf) -> Result<()> {
     debug!("{:?}", std::env::current_dir());
     debug!("{:?}", config);
 
-    // TODO: factor out with boot_fake_node?
-    let (runtime_path, version) = match config.runtime {
-        Runtime::FetchVersion(ref version) => {
-            boot_fake_node::get_runtime_binary(version, true).await?
+    let (version, runtime_path) = match config.runtime {
+        Runtime::FetchVersion(version) => {
+            (version, None)
         }
         Runtime::RepoPath(runtime_path) => {
-            if !runtime_path.exists() {
-                return Err(eyre!("RepoPath {:?} does not exist.", runtime_path));
-            }
-            let runtime_path = if runtime_path.is_dir() {
-                // Compile the runtime binary
-                boot_fake_node::compile_runtime(&runtime_path, config.runtime_build_release, true)?;
-                runtime_path
-                    .join("target")
-                    .join(if config.runtime_build_release {
-                        "release"
-                    } else {
-                        "debug"
-                    })
-                    .join("hyperdrive")
-            } else {
-                runtime_path
-            };
-            let Some((output, _)) = build::run_command(
-                Command::new("bash").args(["-c", &format!("{} --version", runtime_path.display())]),
-                false,
-            )?
-            else {
-                return Err(eyre!("couldn't get Hyperdrive version"));
-            };
-            let version = output
-                .split('\n')
-                .nth(0)
-                .unwrap()
-                .split(' ')
-                .last()
-                .unwrap();
-            (runtime_path, version.to_string())
+            (String::new(), Some(runtime_path))
         }
     };
-    let version = version.strip_prefix("v").unwrap_or_else(|| &version);
+    let runtime_path = boot_fake_node::get_or_build_runtime_binary(
+        &version,
+        true,
+        runtime_path,
+        config.runtime_build_release,
+    ).await?;
 
     let test_dir_path = PathBuf::from(config_path).canonicalize()?;
     let test_dir_path = test_dir_path.parent().unwrap();
@@ -868,7 +834,6 @@ pub async fn execute(config_path: PathBuf) -> Result<()> {
         handle_test(
             detached,
             &runtime_path,
-            &version,
             test,
             &test_dir_path,
             config.persist_home,

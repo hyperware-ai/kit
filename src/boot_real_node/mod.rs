@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::Result;
 use tokio::sync::Mutex;
 use tracing::instrument;
 
-use crate::boot_fake_node::{compile_runtime, get_runtime_binary, run_runtime};
+use crate::boot_fake_node::{get_or_build_runtime_binary, run_runtime};
 use crate::run_tests::cleanup::{cleanup, cleanup_on_signal};
 use crate::run_tests::types::*;
 
@@ -22,28 +22,12 @@ pub async fn execute(
     mut args: Vec<String>,
 ) -> Result<()> {
     let detached = false; // TODO: to argument?
-                          // TODO: factor out with run_tests?
-    let runtime_path = match runtime_path {
-        None => {
-            let (runtime_path, _) = get_runtime_binary(&version, false).await?;
-            runtime_path
-        }
-        Some(runtime_path) => {
-            if !runtime_path.exists() {
-                return Err(eyre!("--runtime-path {:?} does not exist.", runtime_path));
-            }
-            if runtime_path.is_dir() {
-                // Compile the runtime binary
-                compile_runtime(&runtime_path, release, false)?;
-                runtime_path
-                    .join("target")
-                    .join(if release { "release" } else { "debug" })
-                    .join("hyperdrive")
-            } else {
-                runtime_path
-            }
-        }
-    };
+    let runtime_path = get_or_build_runtime_binary(
+        &version,
+        false,
+        runtime_path,
+        release,
+    ).await?;
 
     let mut task_handles = Vec::new();
 

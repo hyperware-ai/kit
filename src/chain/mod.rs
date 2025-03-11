@@ -211,10 +211,9 @@ async fn check_dot_os_tba(port: u16) -> Result<bool> {
 pub async fn start_chain(
     port: u16,
     mut recv_kill: BroadcastRecvBool,
-    _fakenode_version: Option<semver::Version>,
     verbose: bool,
 ) -> Result<Option<Child>> {
-    let deps = check_foundry_deps(None, None)?;
+    let deps = check_foundry_deps()?;
     get_deps(deps, &mut recv_kill, verbose).await?;
 
     info!("Checking for Anvil on port {}...", port);
@@ -349,7 +348,7 @@ async fn predeploy_contracts(port: u16) -> Result<()> {
 
 /// kit chain, alias to anvil
 #[instrument(level = "trace", skip_all)]
-pub async fn execute(port: u16, version: &str, verbose: bool) -> Result<()> {
+pub async fn execute(port: u16, verbose: bool) -> Result<()> {
     let (send_to_cleanup, mut recv_in_cleanup) = tokio::sync::mpsc::unbounded_channel();
     let (send_to_kill, _recv_kill) = tokio::sync::broadcast::channel(1);
     let recv_kill_in_cos = send_to_kill.subscribe();
@@ -357,12 +356,7 @@ pub async fn execute(port: u16, version: &str, verbose: bool) -> Result<()> {
     let handle_signals = tokio::spawn(cleanup_on_signal(send_to_cleanup.clone(), recv_kill_in_cos));
 
     let recv_kill_in_start_chain = send_to_kill.subscribe();
-    let version = if version == "latest" {
-        None
-    } else {
-        Some(version.parse()?)
-    };
-    let child = start_chain(port, recv_kill_in_start_chain, version, verbose).await?;
+    let child = start_chain(port, recv_kill_in_start_chain, verbose).await?;
     let Some(mut child) = child else {
         return Err(eyre!(
             "Port {} is already in use by another anvil process",
