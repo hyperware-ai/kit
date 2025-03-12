@@ -1,0 +1,5 @@
+world llm-template-test-template-dot-os-v0 {
+    import llm-template;
+    import tester;
+    include process-v1;
+}

@@ -1,0 +1,27 @@
+interface llm-template {
+    variant request {
+        send(send-request),
+        /// history of llm-template with given node
+        history(string),
+    }
+
+    variant response {
+        send,
+        history(list<llm-template-message>),
+    }
+
+    record send-request {
+        target: string,
+        message: string,
+    }
+
+    record llm-template-message {
+        author: string,
+        content: string,
+    }
+}
+
+world llm-template-template-dot-os-v0 {
+    import llm-template;
+    include process-v1;
+}
