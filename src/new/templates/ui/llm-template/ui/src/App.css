@@ -1,0 +1,162 @@
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+  width: 75%;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 1em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+.input-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+
+.input-row > button {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding: 0.3em 0.6em;
+}
+
+.input-row > input {
+  border: 1px solid #ccc;
+  padding: 0.32em 0.6em;
+  font-size: 1em;
+  border-radius: 0.25em;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  width: 100%;
+}
+
+.llm-template-button {
+  padding: 0.25em 0.5em;
+  margin-bottom: 1em;
+  background-color: cornflowerblue;
+}
+
+.llm-template-button.selected {
+  background-color: blue;
+  color: white;
+  cursor: default;
+}
+
+.message-list {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0.5em;
+}
+
+.message {
+  align-self: flex-start;
+  background-color: gray;
+  border-radius: 0.25em;
+  padding: 0.25em 0.5em;
+  margin-bottom: 0.5em;
+  color: white;
+}
+
+.message.ours {
+  align-self: flex-end;
+  background-color: blue;
+  color: white;
+}
+
+.tabs {
+  display: flex;
+  margin-bottom: 10px;
+}
+
+.tabs button {
+  padding: 8px 16px;
+  border: 1px solid #ccc;
+  background: #f5f5f5;
+  cursor: pointer;
+  margin-right: 5px;
+}
+
+.tabs button.active {
+  background: #007bff;
+  color: white;
+  border-color: #0056b3;
+}
+
+.header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.message-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.message-table th, .message-table td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: left;
+}
+
+.message-table th {
+  background-color: #f2f2f2;
+  position: sticky;
+  top: 0;
+}
+
+.message-table tr:nth-child(even) {
+  background-color: #f9f9f9;
+}
+
+.ws-message-list li {
+  padding: 5px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.input-row {
+  display: flex;
+}
+
+.input-row input {
+  flex: 1;
+  padding: 8px;
+  margin-right: 8px;
+}
