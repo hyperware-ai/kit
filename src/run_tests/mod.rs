@@ -126,7 +126,7 @@ fn make_node_names(nodes: Vec<Node>) -> Result<Vec<String>> {
                 .and_then(|base| Some(base.to_string()))
                 .and_then(|mut base| {
                     if !base.contains(".") {
-                        base.push_str(".dev");
+                        base.push_str(".os");
                     }
                     Some(base)
                 })
@@ -215,7 +215,7 @@ async fn boot_nodes(
 
         let mut name = node.fake_node_name.clone();
         if !name.contains(".") {
-            name.push_str(".dev");
+            name.push_str(".os");
         }
 
         args.extend_from_slice(&[
@@ -312,7 +312,7 @@ async fn build_packages(
     let nodes = vec![Node {
         port: port.clone(),
         home,
-        fake_node_name: "fake.dev".into(),
+        fake_node_name: "fake.os".into(),
         password: None,
         rpc: None,
         runtime_verbosity: Some(2),
@@ -331,7 +331,7 @@ async fn build_packages(
     // boot fakechain
     let recv_kill_in_start_chain = send_to_kill.subscribe();
     let anvil_process =
-        chain::start_chain(test.fakechain_router, recv_kill_in_start_chain, false).await?;
+        chain::start_chain(test.fakechain_router, recv_kill_in_start_chain, false, false).await?;
 
     boot_nodes(
         &nodes,
@@ -728,7 +728,7 @@ async fn handle_test(
     // boot fakechain
     let recv_kill_in_start_chain = send_to_kill.subscribe();
     let anvil_process =
-        chain::start_chain(test.fakechain_router, recv_kill_in_start_chain, false).await?;
+        chain::start_chain(test.fakechain_router, recv_kill_in_start_chain, false, false).await?;
 
     // Process each node
     boot_nodes(

@@ -483,11 +483,11 @@ pub async fn execute(
     let _cleanup_context = CleanupContext::new(send_to_cleanup_for_cleanup);
 
     if !fake_node_name.contains(".") {
-        fake_node_name.push_str(".dev");
+        fake_node_name.push_str(".os");
     }
 
     // boot fakechain
-    let anvil_process = chain::start_chain(fakechain_port, recv_kill_in_start_chain, false).await?;
+    let anvil_process = chain::start_chain(fakechain_port, recv_kill_in_start_chain, false, false).await?;
 
     if let Some(rpc) = rpc {
         args.extend_from_slice(&["--rpc".into(), rpc.into()]);

@@ -13,74 +13,99 @@ use crate::run_tests::types::BroadcastRecvBool;
 use crate::setup::{check_foundry_deps, get_deps};
 use crate::KIT_CACHE;
 
-const OWNER_ADDRESS: &str = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"; // first account on anvil
-const DOT_OS_TBA: &str = "0xbE46837617f8304Aa5E6d0aE62B74340251f48Bf"; // dot OS TBA
+// important contract addresses:
+//  https://gist.github.com/nick1udwig/273292fdfe94dd1c563f302df8bdfb74
+
+// first account on anvil
+const OWNER_ADDRESS: &str = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
+
+const ERC6551_REGISTRY: &str = "0x000000006551c19487814612e58FE06813775758";
+const MULTICALL3: &str = "0xcA11bde05977b3631167028862bE2a173976CA11";
+const CREATE2: &str = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
+
+const HYPERMAP_PROXY: &str = "0x000000000044C6B8Cb4d8f0F889a3E47664EAeda";
+const HYPERMAP: &str = "0x000000000013a0486EBDc2DB1D7B4d1f7fCA92eD";
+const HYPER_ACCOUNT: &str = "0x0000000000EDAd72076CBe7b9Cfa3751D5a85C97";
+//const HYPER_ACCOUNT_MINTER: &str = "0xE01dCbD3Ed5f709874A1eA7a25677de18C8661c9";
+
+const DOT_OS_TBA: &str = "0x9b3853358ede717fc7D4806cF75d7A4d4517A9C9";
+const ZEROTH_TBA: &str = "0x809A598d9883f2Fb6B77382eBfC9473Fd6A857c9";
+
+const HYPERMAP_PROXY_LONG: &str = "0x000000000000000000000000000000000044C6B8Cb4d8f0F889a3E47664EAeda";
+const HYPERMAP_LONG: &str = "0x000000000000000000000000000000000013a0486EBDc2DB1D7B4d1f7fCA92eD";
 
 const DEFAULT_MAX_ATTEMPTS: u16 = 16;
 
 const PREDEPLOY_CONTRACTS: &[(&str, &str)] = &[
     (
-        "0x000000006551c19487814612e58FE06813775758", // ERC6551Registry
-        include_str!("./bytecode/erc6551_registry.txt"),
+        ERC6551_REGISTRY,
+        include_str!("./bytecode/erc6551registry.txt"),
     ),
     (
-        "0xcA11bde05977b3631167028862bE2a173976CA11", // Multicall3
+        MULTICALL3,
         include_str!("./bytecode/multicall.txt"),
     ),
     (
-        "0x000000000012d439e33aAD99149d52A5c6f980Dc", // KinoAccount
-        include_str!("./bytecode/kinoaccount.txt"),
+        HYPER_ACCOUNT,
+        include_str!("./bytecode/hyperaccount.txt"),
     ),
-    // public minter should be at: 0xa470f15b504f025ce24ed3dbb417b367d3def72f
     (
-        "0x000000000033e5CCbC52Ec7BDa87dB768f9aA93F", // Kimap proxy
+        HYPERMAP_PROXY,
         include_str!("./bytecode/erc1967proxy.txt"),
     ),
     (
-        "0x969cAbCE3625224BA3d340ea4dC2f929301188Ad", // Kimap impl
-        include_str!("./bytecode/kimap.txt"),
+        HYPERMAP,
+        include_str!("./bytecode/hypermap.txt"),
     ),
 ];
 
 const STORAGE_SLOTS: &[(&str, &str, &str)] = &[
     // Implementation slot
     (
-        "0x000000000033e5CCbC52Ec7BDa87dB768f9aA93F", // Kimap proxy
-        "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc", // implementation slot
-        "0x000000000000000000000000969cAbCE3625224BA3d340ea4dC2f929301188Ad", // implementation address
+        HYPERMAP_PROXY,
+        "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+        HYPERMAP_LONG,
     ),
-    // KIMAP immutable (set to proxy's own address)
+    // Hypermap immutable (set to proxy's own address)
     (
-        "0x000000000033e5CCbC52Ec7BDa87dB768f9aA93F", // Kimap proxy
-        "0x0000000000000000000000000000000000000000000000000000000000000000", // storage slot
-        "0x000000000000000000000000000000000033e5ccbc52ec7bda87db768f9aa93f", // kimap proxy address
+        HYPERMAP_PROXY,
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        HYPERMAP_PROXY_LONG,
     ),
 ];
 
 const TRANSACTIONS: &[(&str, &str)] = &[
-    // initialize Kimap
+    // initialize Hypermap: give ownership to OWNER_ADDRESS
     // cast calldata "initialize(address)" 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
     (
-        "0x000000000033e5CCbC52Ec7BDa87dB768f9aA93F",
+        HYPERMAP_PROXY,
         "0xc4d66de8000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266",
     ),
-    // CREATE2 deploy KinoAccountMinter (deployed at 0xa470f15b504f025ce24ed3dbb417b367d3def72f)
+    // CREATE2 deploy HyperAccountMinter (deployed at 0xE01dCbD3Ed5f709874A1eA7a25677de18C8661c9)
     (
-        "0x4e59b44847b379578588920cA78FbF26c0B4956C",
-        include_str!("./bytecode/deploykinoaccountminter.txt"),
+        CREATE2,
+        include_str!("./bytecode/deploy-hyperaccount-minter.txt"),
     ),
-    // mint .os
-    // cast calldata "execute(address,uint256,bytes,uint8)" 0x000000000033e5CCbC52Ec7BDa87dB768f9aA93F 0 $(cast calldata "mint(address,bytes,bytes,address)" 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 $(cast --from-ascii "os") $(cast calldata "initialize()") 0xa470f15b504f025ce24ed3dbb417b367d3def72f) 0
+    // CREATE2 deploy HyperAccountPermissionedMinter
     (
-        "0x4bb0778bb92564bf8e82d0b3271b7512443fb060", // zeroth TBA
-        "0x51945447000000000000000000000000000000000033e5ccbc52ec7bda87db768f9aa93f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000104094cefed000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000a470f15b504f025ce24ed3dbb417b367d3def72f00000000000000000000000000000000000000000000000000000000000000026f7300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000048129fc1c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        CREATE2,
+        include_str!("./bytecode/deploy-hyperaccount-permissioned-minter.txt"),
     ),
-    // mint .dev
-    // cast calldata "execute(address,uint256,bytes,uint8)" 0x000000000033e5CCbC52Ec7BDa87dB768f9aA93F 0 $(cast calldata "mint(address,bytes,bytes,address)" 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 $(cast --from-ascii "dev") $(cast calldata "initialize()") 0xa470f15b504f025ce24ed3dbb417b367d3def72f) 0
+    // CREATE2 deploy HyperAccount9CharCommitMinter
     (
-        "0x4bb0778bb92564bf8e82d0b3271b7512443fb060", // zeroth TBA
-        "0x51945447000000000000000000000000000000000033e5ccbc52ec7bda87db768f9aa93f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000104094cefed000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000a470f15b504f025ce24ed3dbb417b367d3def72f0000000000000000000000000000000000000000000000000000000000000003646576000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000048129fc1c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        CREATE2,
+        include_str!("./bytecode/deploy-hyperaccount-9char-commit-minter.txt"),
     ),
+    // mint .f
+    // cast calldata "execute(address,uint256,bytes,uint8)" 0x000000000044C6B8Cb4d8f0F889a3E47664EAeda 0 $(cast calldata "mint(address,bytes,bytes,address)" 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 $(cast --from-ascii "f") $(cast calldata "initialize()") 0xE01dCbD3Ed5f709874A1eA7a25677de18C8661c9) 0
+    (
+        ZEROTH_TBA,
+        include_str!("./bytecode/mint-os.txt"),
+    ),
+    //(
+    //    ZEROTH_TBA,
+    //    include_str!("./bytecode/mint-f.txt"),
+    //),
 ];
 
 #[instrument(level = "trace", skip_all)]
@@ -165,6 +190,8 @@ async fn initialize_contracts(port: u16) -> Result<()> {
             .json()
             .await?;
 
+        info!("transaction to {to}:\n{res}");
+
         if let Some(error) = res.get("error") {
             info!("Transaction failed: {:?}", error);
         }
@@ -204,6 +231,7 @@ async fn check_dot_os_tba(port: u16) -> Result<bool> {
     let response = client.post(&url).json(&request_body).send().await?;
     let result: serde_json::Value = response.json().await?;
     let code = result["result"].as_str().unwrap_or("0x");
+    info!("cdot: {}", code != "0x");
     Ok(code != "0x")
 }
 
@@ -212,6 +240,7 @@ pub async fn start_chain(
     port: u16,
     mut recv_kill: BroadcastRecvBool,
     verbose: bool,
+    tracing: bool,
 ) -> Result<Option<Child>> {
     let deps = check_foundry_deps()?;
     get_deps(deps, &mut recv_kill, verbose).await?;
@@ -225,9 +254,12 @@ pub async fn start_chain(
         return Ok(None);
     }
 
+    let mut args = vec!["--port".to_string(), port.to_string()];
+    if tracing {
+        args.push("--tracing".to_string());
+    }
     let mut child = Command::new("anvil")
-        .arg("--port")
-        .arg(port.to_string())
+        .args(args)
         .current_dir(KIT_CACHE)
         .stdout(if verbose {
             Stdio::inherit()
@@ -326,7 +358,9 @@ async fn predeploy_contracts(port: u16) -> Result<()> {
         let result: serde_json::Value = response.json().await?;
         let code = result["result"].as_str().unwrap_or("0x");
 
+        info!("pc: {address}");
         if code == "0x" {
+            info!("pc: deploying...");
             let request_body = serde_json::json!({
                 "jsonrpc": "2.0",
                 "method": "anvil_setCode",
@@ -348,7 +382,7 @@ async fn predeploy_contracts(port: u16) -> Result<()> {
 
 /// kit chain, alias to anvil
 #[instrument(level = "trace", skip_all)]
-pub async fn execute(port: u16, verbose: bool) -> Result<()> {
+pub async fn execute(port: u16, verbose: bool, tracing: bool) -> Result<()> {
     let (send_to_cleanup, mut recv_in_cleanup) = tokio::sync::mpsc::unbounded_channel();
     let (send_to_kill, _recv_kill) = tokio::sync::broadcast::channel(1);
     let recv_kill_in_cos = send_to_kill.subscribe();
@@ -356,7 +390,7 @@ pub async fn execute(port: u16, verbose: bool) -> Result<()> {
     let handle_signals = tokio::spawn(cleanup_on_signal(send_to_cleanup.clone(), recv_kill_in_cos));
 
     let recv_kill_in_start_chain = send_to_kill.subscribe();
-    let child = start_chain(port, recv_kill_in_start_chain, verbose).await?;
+    let child = start_chain(port, recv_kill_in_start_chain, verbose, tracing).await?;
     let Some(mut child) = child else {
         return Err(eyre!(
             "Port {} is already in use by another anvil process",
