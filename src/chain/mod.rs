@@ -31,7 +31,8 @@ const HYPER_ACCOUNT: &str = "0x0000000000EDAd72076CBe7b9Cfa3751D5a85C97";
 const DOT_OS_TBA: &str = "0x9b3853358ede717fc7D4806cF75d7A4d4517A9C9";
 const ZEROTH_TBA: &str = "0x809A598d9883f2Fb6B77382eBfC9473Fd6A857c9";
 
-const HYPERMAP_PROXY_LONG: &str = "0x000000000000000000000000000000000044C6B8Cb4d8f0F889a3E47664EAeda";
+const HYPERMAP_PROXY_LONG: &str =
+    "0x000000000000000000000000000000000044C6B8Cb4d8f0F889a3E47664EAeda";
 const HYPERMAP_LONG: &str = "0x000000000000000000000000000000000013a0486EBDc2DB1D7B4d1f7fCA92eD";
 
 const DEFAULT_MAX_ATTEMPTS: u16 = 16;
@@ -41,22 +42,10 @@ const PREDEPLOY_CONTRACTS: &[(&str, &str)] = &[
         ERC6551_REGISTRY,
         include_str!("./bytecode/erc6551registry.txt"),
     ),
-    (
-        MULTICALL3,
-        include_str!("./bytecode/multicall.txt"),
-    ),
-    (
-        HYPER_ACCOUNT,
-        include_str!("./bytecode/hyperaccount.txt"),
-    ),
-    (
-        HYPERMAP_PROXY,
-        include_str!("./bytecode/erc1967proxy.txt"),
-    ),
-    (
-        HYPERMAP,
-        include_str!("./bytecode/hypermap.txt"),
-    ),
+    (MULTICALL3, include_str!("./bytecode/multicall.txt")),
+    (HYPER_ACCOUNT, include_str!("./bytecode/hyperaccount.txt")),
+    (HYPERMAP_PROXY, include_str!("./bytecode/erc1967proxy.txt")),
+    (HYPERMAP, include_str!("./bytecode/hypermap.txt")),
 ];
 
 const STORAGE_SLOTS: &[(&str, &str, &str)] = &[
@@ -98,10 +87,7 @@ const TRANSACTIONS: &[(&str, &str)] = &[
     ),
     // mint .f
     // cast calldata "execute(address,uint256,bytes,uint8)" 0x000000000044C6B8Cb4d8f0F889a3E47664EAeda 0 $(cast calldata "mint(address,bytes,bytes,address)" 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 $(cast --from-ascii "f") $(cast calldata "initialize()") 0xE01dCbD3Ed5f709874A1eA7a25677de18C8661c9) 0
-    (
-        ZEROTH_TBA,
-        include_str!("./bytecode/mint-os.txt"),
-    ),
+    (ZEROTH_TBA, include_str!("./bytecode/mint-os.txt")),
     //(
     //    ZEROTH_TBA,
     //    include_str!("./bytecode/mint-f.txt"),

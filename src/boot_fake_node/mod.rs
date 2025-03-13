@@ -487,7 +487,8 @@ pub async fn execute(
     }
 
     // boot fakechain
-    let anvil_process = chain::start_chain(fakechain_port, recv_kill_in_start_chain, false, false).await?;
+    let anvil_process =
+        chain::start_chain(fakechain_port, recv_kill_in_start_chain, false, false).await?;
 
     if let Some(rpc) = rpc {
         args.extend_from_slice(&["--rpc".into(), rpc.into()]);

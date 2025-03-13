@@ -330,8 +330,13 @@ async fn build_packages(
 
     // boot fakechain
     let recv_kill_in_start_chain = send_to_kill.subscribe();
-    let anvil_process =
-        chain::start_chain(test.fakechain_router, recv_kill_in_start_chain, false, false).await?;
+    let anvil_process = chain::start_chain(
+        test.fakechain_router,
+        recv_kill_in_start_chain,
+        false,
+        false,
+    )
+    .await?;
 
     boot_nodes(
         &nodes,
@@ -727,8 +732,13 @@ async fn handle_test(
 
     // boot fakechain
     let recv_kill_in_start_chain = send_to_kill.subscribe();
-    let anvil_process =
-        chain::start_chain(test.fakechain_router, recv_kill_in_start_chain, false, false).await?;
+    let anvil_process = chain::start_chain(
+        test.fakechain_router,
+        recv_kill_in_start_chain,
+        false,
+        false,
+    )
+    .await?;
 
     // Process each node
     boot_nodes(
