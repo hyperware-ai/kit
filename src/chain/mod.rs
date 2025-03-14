@@ -6,7 +6,7 @@ use color_eyre::{
 };
 use reqwest::Client;
 use tokio::time::{sleep, Duration};
-use tracing::{info, instrument};
+use tracing::{debug, info, instrument};
 
 use crate::run_tests::cleanup::{clean_process_by_pid, cleanup_on_signal};
 use crate::run_tests::types::BroadcastRecvBool;
@@ -85,14 +85,85 @@ const TRANSACTIONS: &[(&str, &str)] = &[
         CREATE2,
         include_str!("./bytecode/deploy-hyperaccount-9char-commit-minter.txt"),
     ),
-    // mint .f
-    // cast calldata "execute(address,uint256,bytes,uint8)" 0x000000000044C6B8Cb4d8f0F889a3E47664EAeda 0 $(cast calldata "mint(address,bytes,bytes,address)" 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 $(cast --from-ascii "f") $(cast calldata "initialize()") 0xE01dCbD3Ed5f709874A1eA7a25677de18C8661c9) 0
+    // mint .os
+    //  NOTE: the account implementation here is not
+    //        HyperAccount9CharCommitMinter like on mainnet.
+    //        instead, we use HyperAccountMinter so that we
+    //        can mint these nodes very easily when a new fake
+    //        node is spun up
+    // cast calldata "execute(address,uint256,bytes,uint8)" 0x000000000044C6B8Cb4d8f0F889a3E47664EAeda 0 $(cast calldata "mint(address,bytes,bytes,address)" 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 $(cast --from-ascii "os") $(cast calldata "initialize()") 0xE01dCbD3Ed5f709874A1eA7a25677de18C8661c9) 0
     (ZEROTH_TBA, include_str!("./bytecode/mint-os.txt")),
-    //(
-    //    ZEROTH_TBA,
-    //    include_str!("./bytecode/mint-f.txt"),
-    //),
 ];
+
+#[instrument(level = "trace", skip_all)]
+async fn get_nonce(port: u16, client: &Client, address: &str) -> Result<u64> {
+    let url = format!("http://localhost:{}", port);
+    let request_body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_getTransactionCount",
+        "params": [address, "latest"],
+        "id": 1
+    });
+    let response: serde_json::Value = client
+        .post(&url)
+        .json(&request_body)
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    let nonce_hex = response["result"]
+        .as_str()
+        .ok_or_else(|| eyre!("Invalid nonce response"))?
+        .trim_start_matches("0x");
+
+    let nonce = u64::from_str_radix(nonce_hex, 16)?;
+    Ok(nonce)
+}
+
+#[instrument(level = "trace", skip_all)]
+async fn execute_transaction(
+    port: u16,
+    client: &Client,
+    from: &str,
+    to: &str,
+    data: &str,
+    nonce: u64,
+) -> Result<String> {
+    let url = format!("http://localhost:{}", port);
+    let request_body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_sendTransaction",
+        "params": [{
+            "from": from,
+            "to": to,
+            "data": data,
+            "nonce": format!("0x{:x}", nonce),
+            "gas": "0x500000",
+        }],
+        "id": 1
+    });
+
+    let res: serde_json::Value = client
+        .post(&url)
+        .json(&request_body)
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    if let Some(result) = res.get("result") {
+        if let Some(result) = result.as_str() {
+            let result = result.to_string();
+            return Ok(result);
+        }
+        return Err(eyre!("unexpected result: {res}"));
+    }
+    if let Some(error) = res.get("error") {
+        return Err(eyre!("{error}"));
+    }
+    return Err(eyre!("unexpected response: {res}"));
+}
 
 #[instrument(level = "trace", skip_all)]
 async fn initialize_contracts(port: u16) -> Result<()> {
@@ -131,55 +202,13 @@ async fn initialize_contracts(port: u16) -> Result<()> {
             .await?;
     }
 
-    // get current nonce
-    let request_body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "eth_getTransactionCount",
-        "params": [OWNER_ADDRESS, "latest"],
-        "id": 1
-    });
-    let response: serde_json::Value = client
-        .post(&url)
-        .json(&request_body)
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    let nonce_hex = response["result"]
-        .as_str()
-        .ok_or_else(|| eyre!("Invalid nonce response"))?
-        .trim_start_matches("0x");
-
-    let mut nonce = u64::from_str_radix(nonce_hex, 16)?;
+    let mut nonce = get_nonce(port, &client, OWNER_ADDRESS).await?;
 
     // execute all transactions
     for (to, data) in TRANSACTIONS {
-        let request_body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_sendTransaction",
-            "params": [{
-                "from": OWNER_ADDRESS,
-                "to": to,
-                "data": data,
-                "nonce": format!("0x{:x}", nonce),
-                "gas": "0x500000",
-            }],
-            "id": 1
-        });
-
-        let res: serde_json::Value = client
-            .post(&url)
-            .json(&request_body)
-            .send()
-            .await?
-            .json()
-            .await?;
-
-        info!("transaction to {to}:\n{res}");
-
-        if let Some(error) = res.get("error") {
-            info!("Transaction failed: {:?}", error);
+        match execute_transaction(port, &client, OWNER_ADDRESS, to, data, nonce).await {
+            Ok(result) => debug!("Transaction to {to}:  {result}"),
+            Err(e) => info!("Transaction failed: {e:?}"),
         }
         nonce += 1;
     }
