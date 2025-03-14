@@ -249,6 +249,7 @@ fn check_rust_toolchains_targets() -> Result<Vec<Dependency>> {
     let mut missing_deps = Vec::new();
     let output = Command::new("rustup").arg("show").output()?.stdout;
     let output = String::from_utf8_lossy(&output);
+
     let original_default = output.split('\n').fold("", |d, item| {
         if !item.contains("(default)") {
             d
@@ -258,9 +259,6 @@ fn check_rust_toolchains_targets() -> Result<Vec<Dependency>> {
     });
 
     // check for wasm32-wasip1
-    let output = Command::new("rustup").arg("show").output()?.stdout;
-    let output = String::from_utf8_lossy(&output);
-
     let has_wasm32_wasi = output
         .split('\n')
         .fold(false, |acc, item| acc || item == "wasm32-wasip1");
