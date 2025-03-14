@@ -246,7 +246,6 @@ async fn check_dot_os_tba(port: u16) -> Result<bool> {
     let response = client.post(&url).json(&request_body).send().await?;
     let result: serde_json::Value = response.json().await?;
     let code = result["result"].as_str().unwrap_or("0x");
-    info!("cdot: {}", code != "0x");
     Ok(code != "0x")
 }
 
@@ -373,9 +372,7 @@ async fn predeploy_contracts(port: u16) -> Result<()> {
         let result: serde_json::Value = response.json().await?;
         let code = result["result"].as_str().unwrap_or("0x");
 
-        info!("pc: {address}");
         if code == "0x" {
-            info!("pc: deploying...");
             let request_body = serde_json::json!({
                 "jsonrpc": "2.0",
                 "method": "anvil_setCode",
@@ -389,6 +386,7 @@ async fn predeploy_contracts(port: u16) -> Result<()> {
                 .await?
                 .json()
                 .await?;
+            info!("Deployed contract at {address}.");
         }
     }
 
