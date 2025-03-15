@@ -247,32 +247,17 @@ fn parse_version(version_str: &str) -> Option<(u32, u32)> {
 #[instrument(level = "trace", skip_all)]
 fn check_rust_toolchains_targets() -> Result<Vec<Dependency>> {
     let mut missing_deps = Vec::new();
-    let output = Command::new("rustup").arg("show").output()?.stdout;
-    let output = String::from_utf8_lossy(&output);
 
-    let original_default = output.split('\n').fold("", |d, item| {
-        if !item.contains("(default)") {
-            d
-        } else {
-            item.split(' ').nth(0).unwrap_or("")
-        }
-    });
+    let has_wasm32_wasi = Command::new("sh")
+        .arg("-c")
+        .arg("rustup show | grep -A 255 'installed targets' | grep -q 'wasm32-wasip1'")
+        .output()?
+        .status;
 
-    // check for wasm32-wasip1
-    let has_wasm32_wasi = output
-        .split('\n')
-        .fold(false, |acc, item| acc || item == "wasm32-wasip1");
-    if !has_wasm32_wasi {
+    if !has_wasm32_wasi.success() {
         missing_deps.push(Dependency::RustWasm32Wasi);
     }
 
-    run_command(
-        Command::new("rustup")
-            .args(&["default", original_default])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null()),
-        false,
-    )?;
     Ok(missing_deps)
 }
 
