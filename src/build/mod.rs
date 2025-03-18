@@ -930,6 +930,7 @@ async fn compile_rust_wasm_process(
 
     // Build the module using Cargo
     let mut args = vec![
+        "+stable",
         "build",
         "--release",
         "--no-default-features",

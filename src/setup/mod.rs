@@ -213,9 +213,9 @@ fn call_rustup(arg: &str, verbose: bool) -> Result<()> {
 #[instrument(level = "trace", skip_all)]
 fn call_cargo(arg: &str, verbose: bool) -> Result<()> {
     let command = if arg.contains("--color=always") {
-        format!("cargo {}", arg)
+        format!("cargo +stable {}", arg)
     } else {
-        format!("cargo --color=always {}", arg)
+        format!("cargo +stable --color=always {}", arg)
     };
     run_command(Command::new("bash").args(&["-c", &command]), verbose)?;
     Ok(())
@@ -248,13 +248,14 @@ fn parse_version(version_str: &str) -> Option<(u32, u32)> {
 fn check_rust_toolchains_targets() -> Result<Vec<Dependency>> {
     let mut missing_deps = Vec::new();
 
-    let has_wasm32_wasi = Command::new("sh")
-        .arg("-c")
-        .arg("rustup show | grep -A 255 'installed targets' | grep -q 'wasm32-wasip1'")
-        .output()?
-        .status;
+    let output = Command::new("rustup").arg("+stable").arg("show").output()?.stdout;
+    let output = String::from_utf8_lossy(&output);
 
-    if !has_wasm32_wasi.success() {
+    let has_wasm32_wasi = output
+        .split('\n')
+        .fold(false, |acc, item| acc || item == "wasm32-wasip1");
+
+    if !has_wasm32_wasi {
         missing_deps.push(Dependency::RustWasm32Wasi);
     }
 
