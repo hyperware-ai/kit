@@ -23,13 +23,12 @@ pub const REQUIRED_PY_PACKAGE: &str = "componentize-py==0.11.0";
 
 #[derive(Clone)]
 pub enum Dependency {
-    Foundry(Option<String>),
+    Foundry,
     Nvm,
     Npm,
     Node,
     Rust,
-    RustNightly,
-    RustNightlyWasm32Wasi,
+    RustWasm32Wasi,
     WasmTools,
     Docker,
 }
@@ -37,13 +36,12 @@ pub enum Dependency {
 impl std::fmt::Display for Dependency {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Dependency::Foundry(v) => write!(f, "foundry {v:?}"),
+            Dependency::Foundry => write!(f, "foundry"),
             Dependency::Nvm => write!(f, "nvm {}", FETCH_NVM_VERSION),
             Dependency::Npm => write!(f, "npm {}.{}", MINIMUM_NPM_MAJOR, MINIMUM_NPM_MINOR),
             Dependency::Node => write!(f, "node {}.{}", REQUIRED_NODE_MAJOR, MINIMUM_NODE_MINOR),
             Dependency::Rust => write!(f, "rust"),
-            Dependency::RustNightly => write!(f, "rust nightly"),
-            Dependency::RustNightlyWasm32Wasi => write!(f, "rust nightly wasm32-wasip1 target"),
+            Dependency::RustWasm32Wasi => write!(f, "rust wasm32-wasip1 target"),
             Dependency::WasmTools => write!(f, "wasm-tools"),
             Dependency::Docker => write!(f, "docker"),
         }
@@ -215,9 +213,9 @@ fn call_rustup(arg: &str, verbose: bool) -> Result<()> {
 #[instrument(level = "trace", skip_all)]
 fn call_cargo(arg: &str, verbose: bool) -> Result<()> {
     let command = if arg.contains("--color=always") {
-        format!("cargo {}", arg)
+        format!("cargo +stable {}", arg)
     } else {
-        format!("cargo --color=always {}", arg)
+        format!("cargo +stable --color=always {}", arg)
     };
     run_command(Command::new("bash").args(&["-c", &command]), verbose)?;
     Ok(())
@@ -249,52 +247,22 @@ fn parse_version(version_str: &str) -> Option<(u32, u32)> {
 #[instrument(level = "trace", skip_all)]
 fn check_rust_toolchains_targets() -> Result<Vec<Dependency>> {
     let mut missing_deps = Vec::new();
-    let output = Command::new("rustup").arg("show").output()?.stdout;
+
+    let output = Command::new("rustup")
+        .arg("+stable")
+        .arg("show")
+        .output()?
+        .stdout;
     let output = String::from_utf8_lossy(&output);
-    let original_default = output.split('\n').fold("", |d, item| {
-        if !item.contains("(default)") {
-            d
-        } else {
-            item.split(' ').nth(0).unwrap_or("")
-        }
-    });
 
-    // check nightly deps
-    let has_nightly_toolchain = output
+    let has_wasm32_wasi = output
         .split('\n')
-        .fold(false, |acc, item| acc || item.starts_with("nightly"));
-    if !has_nightly_toolchain {
-        missing_deps.append(&mut vec![
-            Dependency::RustNightly,
-            Dependency::RustNightlyWasm32Wasi,
-        ]);
-    } else {
-        // check for nightly wasm32-wasip1
-        run_command(
-            Command::new("rustup")
-                .args(&["default", "nightly"])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null()),
-            false,
-        )?;
-        let output = Command::new("rustup").arg("show").output()?.stdout;
-        let output = String::from_utf8_lossy(&output);
+        .fold(false, |acc, item| acc || item == "wasm32-wasip1");
 
-        let has_wasm32_wasi = output
-            .split('\n')
-            .fold(false, |acc, item| acc || item == "wasm32-wasip1");
-        if !has_wasm32_wasi {
-            missing_deps.push(Dependency::RustNightlyWasm32Wasi);
-        }
+    if !has_wasm32_wasi {
+        missing_deps.push(Dependency::RustWasm32Wasi);
     }
 
-    run_command(
-        Command::new("rustup")
-            .args(&["default", original_default])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null()),
-        false,
-    )?;
     Ok(missing_deps)
 }
 
@@ -372,12 +340,9 @@ pub fn check_js_deps() -> Result<Vec<Dependency>> {
 
 /// Check for Foundry deps, returning a Vec of Dependency if not found: can be automatically fetched?
 #[instrument(level = "trace", skip_all)]
-pub fn check_foundry_deps(
-    _newer_than: Option<chrono::DateTime<chrono::Utc>>,
-    _required_commit: Option<String>,
-) -> Result<Vec<Dependency>> {
+pub fn check_foundry_deps() -> Result<Vec<Dependency>> {
     if !is_command_installed("anvil")? {
-        return Ok(vec![Dependency::Foundry(_required_commit)]);
+        return Ok(vec![Dependency::Foundry]);
     }
     // let (_, installed_datetime) = get_foundry_version()?;
     Ok(vec![])
@@ -409,14 +374,11 @@ fn get_foundry_version() -> Result<(String, String)> {
 
 /// install forge+anvil+others, could be separated into binary extractions from github releases.
 #[instrument(level = "trace", skip_all)]
-pub fn install_foundry(version: Option<String>, verbose: bool) -> Result<()> {
+fn install_foundry(verbose: bool) -> Result<()> {
     let download_cmd = "curl -L https://foundry.paradigm.xyz | bash";
-    let install_cmd = match version {
-        None => ". ~/.bashrc && foundryup".to_string(),
-        Some(v) => format!(". ~/.bashrc && foundryup -C {v}"),
-    };
+    let install_cmd = ". ~/.bashrc && foundryup";
     run_command(Command::new("bash").args(&["-c", download_cmd]), verbose)?;
-    run_command(Command::new("bash").args(&["-c", &install_cmd]), verbose)?;
+    run_command(Command::new("bash").args(&["-c", install_cmd]), verbose)?;
 
     Ok(())
 }
@@ -428,8 +390,7 @@ pub fn check_rust_deps() -> Result<Vec<Dependency>> {
         // don't have rust -> missing all
         return Ok(vec![
             Dependency::Rust,
-            Dependency::RustNightly,
-            Dependency::RustNightlyWasm32Wasi,
+            Dependency::RustWasm32Wasi,
             Dependency::WasmTools,
         ]);
     }
@@ -506,12 +467,9 @@ pub async fn get_deps(
                         verbose,
                     )?,
                     Dependency::Rust => install_rust(verbose)?,
-                    Dependency::RustNightly => call_rustup("install nightly", verbose)?,
-                    Dependency::RustNightlyWasm32Wasi => {
-                        call_rustup("target add wasm32-wasip1 --toolchain nightly", verbose)?
-                    }
+                    Dependency::RustWasm32Wasi => call_rustup("target add wasm32-wasip1", verbose)?,
                     Dependency::WasmTools => call_cargo("install wasm-tools", verbose)?,
-                    Dependency::Foundry(v) => install_foundry(v, verbose)?,
+                    Dependency::Foundry => install_foundry(verbose)?,
                     Dependency::Docker => {}
                 }
             }

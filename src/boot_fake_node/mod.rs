@@ -77,7 +77,7 @@ pub fn extract_zip(archive_path: &Path) -> Result<()> {
 }
 
 #[instrument(level = "trace", skip_all)]
-pub fn compile_runtime(path: &Path, release: bool, is_simulation_mode: bool) -> Result<()> {
+fn compile_runtime(path: &Path, release: bool, is_simulation_mode: bool) -> Result<()> {
     info!("Compiling Hyperdrive...");
 
     // build the packages
@@ -174,10 +174,7 @@ pub fn get_platform_runtime_name(is_simulation_mode: bool) -> Result<String> {
 }
 
 #[instrument(level = "trace", skip_all)]
-pub async fn get_runtime_binary(
-    version: &str,
-    is_simulation_mode: bool,
-) -> Result<(PathBuf, String)> {
+async fn get_runtime_binary(version: &str, is_simulation_mode: bool) -> Result<PathBuf> {
     let zip_name = get_platform_runtime_name(is_simulation_mode)?;
 
     let version = if version != "latest" {
@@ -214,7 +211,36 @@ pub async fn get_runtime_binary(
         get_runtime_binary_inner(&version, &zip_name, &runtime_dir).await?;
     }
 
-    Ok((runtime_path, version))
+    Ok(runtime_path)
+}
+
+#[instrument(level = "trace", skip_all)]
+pub async fn get_or_build_runtime_binary(
+    version: &str,
+    is_simulation_mode: bool,
+    runtime_path: Option<PathBuf>,
+    is_release: bool,
+) -> Result<PathBuf> {
+    let runtime_path = match runtime_path {
+        None => get_runtime_binary(&version, is_simulation_mode).await?,
+        Some(runtime_path) => {
+            if !runtime_path.exists() {
+                return Err(eyre!("--runtime-path {:?} does not exist.", runtime_path));
+            }
+            let runtime_path = if runtime_path.is_dir() {
+                // Compile the runtime binary
+                compile_runtime(&runtime_path, is_release, is_simulation_mode)?;
+                runtime_path
+                    .join("target")
+                    .join(if is_release { "release" } else { "debug" })
+                    .join("hyperdrive")
+            } else {
+                runtime_path
+            };
+            runtime_path
+        }
+    };
+    Ok(runtime_path)
 }
 
 #[instrument(level = "trace", skip_all)]
@@ -425,46 +451,8 @@ pub async fn execute(
     verbosity: u8,
     mut args: Vec<String>,
 ) -> Result<()> {
-    println!("a");
     let detached = false; // TODO: to argument?
-                          // TODO: factor out with run_tests?
-    let (runtime_path, version) = match runtime_path {
-        None => get_runtime_binary(&version, true).await?,
-        Some(runtime_path) => {
-            println!("b");
-            if !runtime_path.exists() {
-                return Err(eyre!("--runtime-path {:?} does not exist.", runtime_path));
-            }
-            let runtime_path = if runtime_path.is_dir() {
-                // Compile the runtime binary
-                compile_runtime(&runtime_path, release, true)?;
-                runtime_path
-                    .join("target")
-                    .join(if release { "release" } else { "debug" })
-                    .join("hyperdrive")
-            } else {
-                runtime_path
-            };
-            let Some((output, _)) = build::run_command(
-                Command::new("bash").args(["-c", &format!("{} --version", runtime_path.display())]),
-                false,
-            )?
-            else {
-                return Err(eyre!("couldn't get Hyperdrive version"));
-            };
-            let version = output
-                .split('\n')
-                .nth(0)
-                //.rev()
-                //.nth(1)
-                .unwrap()
-                .split(' ')
-                .last()
-                .unwrap();
-            (runtime_path, version.to_string())
-        }
-    };
-    let version = version.strip_prefix("v").unwrap_or_else(|| &version);
+    let runtime_path = get_or_build_runtime_binary(&version, true, runtime_path, release).await?;
 
     let mut task_handles = Vec::new();
 
@@ -495,18 +483,12 @@ pub async fn execute(
     let _cleanup_context = CleanupContext::new(send_to_cleanup_for_cleanup);
 
     if !fake_node_name.contains(".") {
-        fake_node_name.push_str(".dev");
+        fake_node_name.push_str(".os");
     }
 
     // boot fakechain
-    let version = version.parse()?;
-    let anvil_process = chain::start_chain(
-        fakechain_port,
-        recv_kill_in_start_chain,
-        Some(version),
-        false,
-    )
-    .await?;
+    let anvil_process =
+        chain::start_chain(fakechain_port, recv_kill_in_start_chain, false, false).await?;
 
     if let Some(rpc) = rpc {
         args.extend_from_slice(&["--rpc".into(), rpc.into()]);
