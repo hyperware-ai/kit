@@ -248,7 +248,11 @@ fn parse_version(version_str: &str) -> Option<(u32, u32)> {
 fn check_rust_toolchains_targets() -> Result<Vec<Dependency>> {
     let mut missing_deps = Vec::new();
 
-    let output = Command::new("rustup").arg("+stable").arg("show").output()?.stdout;
+    let output = Command::new("rustup")
+        .arg("+stable")
+        .arg("show")
+        .output()?
+        .stdout;
     let output = String::from_utf8_lossy(&output);
 
     let has_wasm32_wasi = output
