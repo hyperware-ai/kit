@@ -29,9 +29,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf -y | sh
           rustup update
           cargo install wasm-tools
-          rustup install nightly
           rustup target add wasm32-wasip1
-          rustup target add wasm32-wasip1 --toolchain nightly
           cargo install cargo-wasi
       - name: Get latest release from foundry-rs/foundry
         id: get-latest-foundry-release
@@ -62,28 +60,10 @@ jobs:
             }
             return asset.browser_download_url;
           result-encoding: string
-      #- name: Get latest release from hyperware-ai/hyperdrive
-      #  id: get-latest-hyperdrive-release
-      #  uses: actions/github-script@v6
-      #  with:
-      #    script: |
-      #      const repo = {
-      #        owner: 'hyperware-ai',
-      #        repo: 'hyperdrive',
-      #      };
-      #      const release = await github.rest.repos.getLatestRelease(repo);
-      #      const asset = release.data.assets.find(asset => asset.name.match(/hyperdrive-x86_64-unknown-linux-gnu\.zip/));
-      #      if (!asset) {
-      #        throw new Error('Asset not found');
-      #      }
-      #      return asset.browser_download_url;
-      #    result-encoding: string
-      #- name: Download the Hyperdrive release
-      #  run: wget -q ${DOWNLOAD_URL} -O hyperdrive.zip
-      #  env:
-      #    DOWNLOAD_URL: ${{ steps.get-latest-hyperdrive-release.outputs.result }}
-      #- name: Unzip the Hyperdrive release
-      #  run: unzip hyperdrive.zip
+      - name: Build the release
+        run: ./scripts/build-release.py
+      - name: Unzip the build output
+        run: unzip /tmp/kit-release/kit-x86_64-unknown-linux-gnu.zip
       - name: Run tests
         run: |
           { ./kit t src/new/templates/tests.toml; } 2>&1
