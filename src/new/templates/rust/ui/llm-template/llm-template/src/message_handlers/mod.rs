@@ -14,7 +14,7 @@ use hyperware_process_lib::Address;
 
 // Helper functions for address creation
 pub fn make_http_address(our: &Address) -> Address {
-    Address::from((our.node(), "http_server", "distro", "sys"))
+    Address::from((our.node(), "http-server", "distro", "sys"))
 }
 
 pub fn make_timer_address(our: &Address) -> Address {

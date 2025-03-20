@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use hyperware_process_lib::logging::{error, info, init_logging, Level};
 use hyperware_process_lib::{
+    kiprintln,
     await_message, call_init,
     http::server::{
         HttpBindingConfig, HttpServer,
@@ -93,6 +94,9 @@ fn handle_message(
     state: &mut AppState,
     server: &mut HttpServer,
 ) -> anyhow::Result<()> {
+    println!("got message: {:?}", message);
+    kiprintln!("got message: {:?}", message.source());
+        
     match message.source() {
         // Handling HTTP and WS requests
         source if source == &make_http_address(our) => {
@@ -101,23 +105,29 @@ fn handle_message(
         }
         // Handling timer messages (for time-based events)
         source if source == &make_timer_address(our) => {
+            kiprintln!("got timer message");
             handle_timer_message(message.body(), state, server)
         }
         // Handling internal messages (messages from other processes on the same node)
-        source if source.node == our.node => {
+        source if source.node == our.node && source != &make_http_address(our) => {
+            kiprintln!("got internal message");
             handle_internal_message(source, message.body(), state, server)
         }
         // Handling terminal messages (for debugging purposes)
         source if source == &make_terminal_address(our) => {
+            kiprintln!("got terminal message");
             handle_terminal_message(message.body(), state, server)
         }
         // Handling external messages (messages from other applications/hyperdrives)
-        source => handle_external_message(
-            source, 
-            message.body(), 
-            state, 
-            server
-        ),
+        source => {
+            kiprintln!("got external message");
+            handle_external_message(
+                source, 
+                message.body(), 
+                state, 
+                server
+            )
+        },
     }
 }
 

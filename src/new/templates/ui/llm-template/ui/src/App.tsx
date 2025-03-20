@@ -3,6 +3,10 @@ import reactLogo from "./assets/react.svg";
 import viteLogo from "./assets/vite.svg";
 import HyperwareClientApi from "@hyperware-ai/client-api";
 import "./App.css";
+import { 
+  MessageLog, 
+  StatusResponse 
+} from "./types/types";
 
 const BASE_URL = import.meta.env.BASE_URL;
 if (window.our) window.our.process = BASE_URL?.replace("/", "");
@@ -19,38 +23,53 @@ console.log('WEBSOCKET URL configured as:', WEBSOCKET_URL);
 function App() {
   const [customMessage, setCustomMessage] = useState("");
   const [customType, setCustomType] = useState("info");
-  const [statusData, setStatusData] = useState<any>(null);
-  const [historyData, setHistoryData] = useState<any[]>([]);
+  const [statusData, setStatusData] = useState<StatusResponse | null>(null);
+  const [historyData, setHistoryData] = useState<MessageLog[]>([]);
   const [nodeConnected, setNodeConnected] = useState(true);
   const [api, setApi] = useState<HyperwareClientApi | undefined>();
   const [wsMessages, setWsMessages] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState("status");
+  const [messageMethod, setMessageMethod] = useState<"http" | "websocket">("http");
+  const [wsStatus, setWsStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
 
   useEffect(() => {
-    // Fetch initial status
-    fetchStatus();
+    let mounted = true;
 
-    console.log('Attempting to connect to WebSocket at:', WEBSOCKET_URL);
-    if (WEBSOCKET_URL) {
+    const connectWebSocket = async () => {
+      if (!WEBSOCKET_URL || wsStatus === 'connecting') return;
+
       try {
-        const api = new HyperwareClientApi({
+        setWsStatus('connecting');
+        console.log('Attempting to connect to WebSocket at:', WEBSOCKET_URL);
+
+        const newApi = new HyperwareClientApi({
           uri: WEBSOCKET_URL,
           nodeId: window.our?.node || 'unknown',
           processId: window.our?.process || BASE_URL?.replace("/", "") || 'unknown',
           onOpen: (_event, _api) => {
-            console.log("Connected to Hyperware");
-            setNodeConnected(true);
+            if (mounted) {
+              console.log("WebSocket Connected");
+              setWsStatus('connected');
+              setNodeConnected(true);
+            }
+          },
+          onClose: () => {
+            if (mounted) {
+              console.log("WebSocket Disconnected");
+              setWsStatus('disconnected');
+              setApi(undefined);
+            }
           },
           onMessage: (json, _api) => {
+            if (!mounted) return;
+
             console.log('WEBSOCKET MESSAGE', json);
             try {
               const data = JSON.parse(json);
               console.log("WebSocket received message", data);
               
-              // Add the message to our list
               setWsMessages(prev => [...prev, JSON.stringify(data)]);
               
-              // If it's a status update, update our status data
               if (data.type === "status_update") {
                 setStatusData(data);
               }
@@ -59,17 +78,37 @@ function App() {
             }
           },
         });
-        setApi(api);
+
+        if (mounted) {
+          setApi(newApi);
+        }
       } catch (error) {
         console.error("Error connecting to WebSocket:", error);
-        setNodeConnected(false);
+        if (mounted) {
+          setWsStatus('disconnected');
+          setNodeConnected(false);
+        }
       }
-    }
-  }, []);
+    };
+
+    connectWebSocket();
+
+    // Cleanup function
+    return () => {
+      mounted = false;
+      setApi(undefined);
+      setWsStatus('disconnected');
+    };
+  }, []); // Empty dependency array to run only once
+
+  const reconnectWebSocket = () => {
+    setApi(undefined);
+    setWsStatus('disconnected');
+    // The WebSocket will automatically reconnect due to the useEffect dependency
+  };
 
   const fetchStatus = async () => {
     try {
-      // Use GET request to the status endpoint without a body
       const response = await fetch(`${BASE_URL}/api/status`, {
         method: "GET",
         headers: {
@@ -77,9 +116,20 @@ function App() {
         }
       });
       
-      if (!response.ok) throw new Error("Failed to fetch status");
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to fetch status");
+      }
+      
       const data = await response.json();
-      setStatusData(data);
+      console.log("Status response:", data);
+      
+      if (data.Status) {
+        setStatusData(data.Status);
+      } else {
+        console.error("Unexpected response format:", data);
+        throw new Error("Invalid response format");
+      }
     } catch (error) {
       console.error("Error fetching status:", error);
       setNodeConnected(false);
@@ -88,7 +138,6 @@ function App() {
 
   const fetchHistory = async () => {
     try {
-      // Use GET request to the history endpoint without a body
       const response = await fetch(`${BASE_URL}/api/history`, {
         method: "GET",
         headers: {
@@ -96,9 +145,20 @@ function App() {
         }
       });
       
-      if (!response.ok) throw new Error("Failed to fetch history");
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to fetch history");
+      }
+      
       const data = await response.json();
-      setHistoryData(data.history || []);
+      console.log("History response:", data);
+      
+      if (data.History && Array.isArray(data.History.messages)) {
+        setHistoryData(data.History.messages);
+      } else {
+        console.error("Unexpected response format:", data);
+        throw new Error("Invalid response format");
+      }
     } catch (error) {
       console.error("Error fetching history:", error);
     }
@@ -106,16 +166,24 @@ function App() {
 
   const clearHistory = async () => {
     try {
+      // Create a properly formatted request
+      const requestData = {
+        ClearHistory: null
+      };
+      
       // Use POST request to the API endpoint with a body
       const response = await fetch(`${BASE_URL}/api`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ ApiRequest: "ClearHistory" })
+        body: JSON.stringify(requestData)
       });
       
-      if (!response.ok) throw new Error("Failed to clear history");
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to clear history");
+      }
       
       // Refresh history data
       setHistoryData([]);
@@ -130,44 +198,47 @@ function App() {
 
     if (!customMessage) return;
 
-    // Updated to use the new API pattern
-    const data = {
-      ApiRequest: "CustomMessage",
-      params: {
-        message_type: customType,
-        content: customMessage
-      }
+    const requestData = {
+        CustomMessage: {
+            message_type: customType,
+            content: customMessage
+        }
     };
 
-    // Send via WebSocket if available
-    if (api) {
-      api.send({ data });
-      setWsMessages(prev => [...prev, `Sent: ${JSON.stringify(data)}`]);
-    }
-
-    // Also send via HTTP
     try {
-      // Add the HTTP request that was missing
-      const response = await fetch(`${BASE_URL}/api`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(data)
-      });
-      
-      if (!response.ok) throw new Error("Failed to send custom message");
-      
-      setCustomMessage("");
-      
-      // Refresh data after sending a message
-      if (activeTab === "history") {
-        fetchHistory();
-      } else {
-        fetchStatus();
-      }
+        if (messageMethod === "websocket") {
+            // Send via WebSocket only
+            if (!api) {
+                throw new Error("WebSocket not connected");
+            }
+            api.send({ data: requestData });
+            setWsMessages(prev => [...prev, `Sent: ${JSON.stringify(requestData)}`]);
+        } else {
+            // Send via HTTP only
+            const response = await fetch(`${BASE_URL}/api`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(requestData)
+            });
+            
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || "Failed to send custom message");
+            }
+        }
+        
+        setCustomMessage("");
+        
+        // Refresh data after sending a message
+        if (activeTab === "history") {
+            fetchHistory();
+        } else {
+            fetchStatus();
+        }
     } catch (error) {
-      console.error("Error sending message:", error);
+        console.error("Error sending message:", error);
     }
   };
 
@@ -243,19 +314,32 @@ function App() {
                 marginBottom: "20px",
               }}
             >
-              <div style={{ marginBottom: "10px" }}>
-                <label htmlFor="messageType">Message Type: </label>
-                <select 
-                  id="messageType" 
-                  value={customType}
-                  onChange={(e) => setCustomType(e.target.value)}
-                >
-                  <option value="info">Info</option>
-                  <option value="warning">Warning</option>
-                  <option value="error">Error</option>
-                  <option value="debug">Debug</option>
-                  <option value="custom">Custom</option>
-                </select>
+              <div style={{ marginBottom: "10px", display: "flex", gap: "20px", alignItems: "center" }}>
+                <div>
+                  <label htmlFor="messageType">Message Type: </label>
+                  <select 
+                    id="messageType" 
+                    value={customType}
+                    onChange={(e) => setCustomType(e.target.value)}
+                  >
+                    <option value="info">Info</option>
+                    <option value="warning">Warning</option>
+                    <option value="error">Error</option>
+                    <option value="debug">Debug</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="messageMethod">Send via: </label>
+                  <select
+                    id="messageMethod"
+                    value={messageMethod}
+                    onChange={(e) => setMessageMethod(e.target.value as "http" | "websocket")}
+                  >
+                    <option value="http">HTTP</option>
+                    <option value="websocket">WebSocket</option>
+                  </select>
+                </div>
               </div>
               <div className="input-row">
                 <input
@@ -325,7 +409,20 @@ function App() {
             {activeTab === "websocket" && (
               <div>
                 <div className="header-row">
-                  <h3>WebSocket Messages</h3>
+                  <div>
+                    <h3>WebSocket Messages</h3>
+                    <div className="ws-status">
+                      Status: <span className={`status-${wsStatus}`}>{wsStatus}</span>
+                      {wsStatus !== 'connected' && (
+                        <button 
+                          onClick={reconnectWebSocket}
+                          className="reconnect-button"
+                        >
+                          Reconnect
+                        </button>
+                      )}
+                    </div>
+                  </div>
                   <button onClick={() => setWsMessages([])}>Clear</button>
                 </div>
                 <div style={{ maxHeight: "300px", overflow: "auto", textAlign: "left" }}>

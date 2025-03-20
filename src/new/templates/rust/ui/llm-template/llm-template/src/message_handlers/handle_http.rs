@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use hyperware_process_lib::{
-    get_blob, Address,
+    get_blob, Address, 
     http::server::{
         send_response, HttpServer, HttpServerRequest, StatusCode, send_ws_push, WsMessageType, IncomingHttpRequest
     },
-    logging::{info, warn},
-    LazyLoadBlob,
+    http::Method,
+    logging::info,
+    LazyLoadBlob, last_blob,
 };
-use serde_json::{self, Value};
+use anyhow::anyhow;
 
 use crate::types::*;
 use crate::log_message;
@@ -62,159 +63,155 @@ pub fn handle_http_server_request(
         HttpServerRequest::WebSocketPush {channel_id, .. } => {
             handle_websocket_push(state, channel_id)    
         },
-        HttpServerRequest::Http(request)=> {
-            println!("got http request");
-            println!("request: {:?}", request.clone());
-            let method = request.method().unwrap().as_str().to_string();
-            let path = request.path().unwrap_or_default();
-            let request = get_http_request(request)?;
-            let result = handle_request_inner(request, state);
+        HttpServerRequest::Http(http_request) => {
+            // Get the HTTP method and path
+            let Ok(method) = http_request.method() else {
+                return Err(anyhow!("HTTP request with no method"));
+            };
+
+            let path = http_request.path().unwrap_or_default();
+            println!("HTTP Request: {} {}", method, path);
+            info!("HTTP Request: {} {}", method, path);
             
-            match result {
-                Ok(response) => {
-                    let headers = HashMap::from([(
-                        "Content-Type".to_string(),
-                        "application/json".to_string(),
-                    )]);
-                    
-                    send_response(
-                        StatusCode::OK,
-                        Some(headers),
-                        serde_json::to_vec(&response)?,
-                    );
-                    Ok(())
+            // Handle different HTTP methods
+            match method {
+                Method::GET => {
+                    // Handle GET requests based on path
+                    match path.as_str() {
+                        "/api/status" => {
+                            let counts: HashMap<String, usize> = state.message_counts
+                                .iter()
+                                .map(|(k, v)| (format!("{:?}", k), *v))
+                                .collect();
+
+                            let response = ApiResponse::Status { 
+                                connected_clients: state.connected_clients.len(),
+                                message_count: state.message_history.len(),
+                                message_counts_by_channel: counts
+                            };
+                            
+                            log_message(
+                                state,
+                                "HTTP:GET".to_string(),
+                                MessageChannel::HttpApi,
+                                MessageType::HttpGet,
+                                Some("Status request".to_string()),
+                            );
+                            
+                            send_response(StatusCode::OK, None, serde_json::to_vec(&response)?);
+                        },
+                        "/api/history" => {
+                            let response = ApiResponse::History { 
+                                messages: state.message_history.clone() 
+                            };
+                            
+                            log_message(
+                                state,
+                                "HTTP:GET".to_string(),
+                                MessageChannel::HttpApi,
+                                MessageType::HttpGet,
+                                Some("History request".to_string()),
+                            );
+                            
+                            send_response(StatusCode::OK, None, serde_json::to_vec(&response)?);
+                        },
+                        _ => {
+                            println!("Non-API path: {}", path);
+                        }
+                    }
                 },
-                Err(err) => {
-                    let headers = HashMap::from([(
-                        "Content-Type".to_string(),
-                        "application/json".to_string(),
-                    )]);
-                    
-                    let error_response = ApiResponse::Error {
-                        code: 500,
-                        message: err.to_string(),
+                Method::POST => {
+                    // For POST requests, we need to parse the body
+                    let Some(blob) = last_blob() else {
+                        let error_response = ApiResponse::Error {
+                            code: 400,
+                            message: "No request body".to_string(),
+                        };
+                        send_response(StatusCode::BAD_REQUEST, None, serde_json::to_vec(&error_response)?);
+                        return Ok(());
                     };
                     
-                    send_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Some(headers),
-                        serde_json::to_vec(&error_response)?,
-                    );
-                    Ok(())
+                    let Ok(request_str) = std::str::from_utf8(&blob.bytes()) else {
+                        let error_response = ApiResponse::Error {
+                            code: 400,
+                            message: "Invalid UTF-8 in request body".to_string(),
+                        };
+                        send_response(StatusCode::BAD_REQUEST, None, serde_json::to_vec(&error_response)?);
+                        return Ok(());
+                    };
+                    
+                    info!("Request body: {}", request_str);
+                    
+                    // Try to parse the API request
+                    match serde_json::from_str::<ApiRequest>(request_str) {
+                        Ok(api_request) => {
+                            match api_request {
+                                ApiRequest::ClearHistory => {
+                                    // Clear the history
+                                    state.message_history.clear();
+                                    state.message_counts.clear();
+                                    
+                                    log_message(
+                                        state,
+                                        "HTTP:POST".to_string(),
+                                        MessageChannel::HttpApi,
+                                        MessageType::HttpPost,
+                                        Some("History cleared".to_string()),
+                                    );
+                                    
+                                    let response = ApiResponse::Success { 
+                                        message: "History cleared successfully".to_string() 
+                                    };
+                                    
+                                    send_response(StatusCode::OK, None, serde_json::to_vec(&response)?);
+                                },
+                                ApiRequest::CustomMessage { message_type, content } => {
+                                    // Log a custom message
+                                    log_message(
+                                        state,
+                                        "HTTP:Custom".to_string(),
+                                        MessageChannel::HttpApi,
+                                        MessageType::Other(message_type.clone()),
+                                        Some(content.clone()),
+                                    );
+                                    
+                                    let response = ApiResponse::Success {   
+                                        message: "Custom message logged successfully".to_string() 
+                                    };
+                                    
+                                    send_response(StatusCode::OK, None, serde_json::to_vec(&response)?);
+                                },
+                                _ => {
+                                    // Invalid request - should use GET endpoints instead
+                                    let error_response = ApiResponse::Error {
+                                        code: 400,
+                                        message: "Invalid request type. Use GET endpoints for status and history.".to_string(),
+                                    };
+                                    send_response(StatusCode::BAD_REQUEST, None, serde_json::to_vec(&error_response)?);
+                                }
+                            }
+                        },
+                        Err(err) => {
+                            let error_response = ApiResponse::Error {
+                                code: 400,
+                                message: format!("Invalid request format: {}", err),
+                            };
+                            send_response(StatusCode::BAD_REQUEST, None, serde_json::to_vec(&error_response)?);
+                        }
+                    }
+                },
+                _ => {
+                    // Method not allowed
+                    let error_response = ApiResponse::Error {
+                        code: 405,
+                        message: format!("Method not allowed: {}", method),
+                    };
+                    send_response(StatusCode::METHOD_NOT_ALLOWED, None, serde_json::to_vec(&error_response)?);
                 }
             }
+            
+            Ok(())
         }
-    }
-}
-fn get_http_request(incoming_request: IncomingHttpRequest) -> anyhow::Result<ApiRequest> {
-    let method = incoming_request.method().unwrap().as_str().to_string();
-    let path = incoming_request.path().unwrap_or_default();
-    
-    // For GET requests, determine the API request type from the path
-    if method == "GET" {
-        match path.as_str() {
-            "/api/status" => return Ok(ApiRequest::GetStatus),
-            "/api/history" => return Ok(ApiRequest::GetHistory),
-            _ => return Err(anyhow::anyhow!("Unknown GET endpoint: {}", path))
-        }
-    }
-    
-    // For non-GET methods, process the request body
-    let Some(blob) = get_blob() else {
-        return Err(anyhow::anyhow!("No request body"));
-    };
-    
-    let Ok(request_str) = std::str::from_utf8(&blob.bytes()) else {
-        return Err(anyhow::anyhow!("Invalid UTF-8 in request body"));
-    };
-    
-    match serde_json::from_str::<ApiRequest>(request_str) {
-        Ok(req) => Ok(req),
-        Err(err) => Err(anyhow::anyhow!("Invalid request format: {}", err))
-    }
-}
-
-fn handle_request_inner(request: ApiRequest, state: &mut AppState) -> anyhow::Result<Value> {
-    // Process based on the ApiRequest type
-    match request {
-        ApiRequest::GetStatus => {
-            // Return status information
-            let counts: HashMap<String, usize> = state.message_counts
-                .iter()
-                .map(|(k, v)| (format!("{:?}", k), *v))
-                .collect();
-
-            let response = ApiResponse::Status { 
-                connected_clients: state.connected_clients.len(),
-                message_count: state.message_history.len(),
-                message_counts_by_channel: counts
-            };
-            
-            log_message(
-                state,
-                "HTTP:GET".to_string(),
-                MessageChannel::HttpApi,
-                MessageType::HttpGet,
-                Some("Status request".to_string()),
-            );
-
-            // Convert directly to a Value
-            Ok(serde_json::to_value(&response)?)
-        },
-        ApiRequest::GetHistory => {
-            let response = ApiResponse::History { 
-                messages: state.message_history.clone() 
-            };
-            
-            log_message(
-                state,
-                "HTTP:GET".to_string(),
-                MessageChannel::HttpApi,
-                MessageType::HttpGet,
-                Some("History request".to_string()),
-            );
-            
-            // Convert directly to a Value
-            Ok(serde_json::to_value(&response)?)
-        },
-        ApiRequest::ClearHistory => {
-            // Handle clear history request
-            state.message_history.clear();
-            state.message_counts.clear();
-            
-            // Log the action
-            log_message(
-                state,
-                "HTTP:POST".to_string(),
-                MessageChannel::HttpApi,
-                MessageType::HttpPost,
-                Some("History cleared".to_string()),
-            );
-            
-            let response = ApiResponse::Success { 
-                message: "History cleared successfully".to_string() 
-            };
-            
-            // Convert directly to a Value
-            Ok(serde_json::to_value(&response)?)
-        },
-        ApiRequest::CustomMessage { message_type, content } => {
-            // Log a custom message
-            log_message(
-                state,
-                "HTTP:Custom".to_string(),
-                MessageChannel::HttpApi,
-                MessageType::Other(message_type.clone()),
-                Some(content.clone()),
-            );
-            
-            let response = ApiResponse::Success {   
-                message: "Custom message logged successfully".to_string() 
-            };
-            
-            // Convert directly to a Value
-            Ok(serde_json::to_value(&response)?)
-        },
     }
 }
 
@@ -230,14 +227,6 @@ fn handle_websocket_push(state: &mut AppState, channel_id: u32) -> anyhow::Resul
         Some(format!("Binary data: {} bytes", blob.bytes().len()))
     };
     
-    log_message(
-        state,
-        "WebSocket".to_string(),
-        MessageChannel::WebSocket,
-        MessageType::WebSocketPushA,
-        content,
-    );
-    
     // Process the websocket message
     if let Ok(message_str) = std::str::from_utf8(&blob.bytes()) {
         if let Ok(api_request) = serde_json::from_str::<ApiRequest>(message_str) {
@@ -252,7 +241,7 @@ fn handle_websocket_push(state: &mut AppState, channel_id: u32) -> anyhow::Resul
                         state,
                         "WebSocket:Clear".to_string(),
                         MessageChannel::WebSocket,
-                        MessageType::WebSocketPushB,
+                        MessageType::WebSocketPushA,
                         Some("History cleared".to_string()),
                     );
                     
