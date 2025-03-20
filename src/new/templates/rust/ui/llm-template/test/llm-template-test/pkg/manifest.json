@@ -1,0 +1,15 @@
+[
+    {
+        "process_name": "llm-template-test",
+        "process_wasm_path": "/llm-template-test.wasm",
+        "on_exit": "Restart",
+        "request_networking": false,
+        "request_capabilities": [
+            "llm-template:llm-template:template.os"
+        ],
+        "grant_capabilities": [
+            "llm-template:llm-template:template.os"
+        ],
+        "public": true
+    }
+]
