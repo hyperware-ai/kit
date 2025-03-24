@@ -74,7 +74,6 @@ wit-bindgen = "0.36.0"
 zip = "0.6"
 
 [workspace]
-members = []
 exclude = ["src/new/templates/*"]
 resolver = "2"
 

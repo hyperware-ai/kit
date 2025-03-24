@@ -6,8 +6,7 @@ use hyperware_process_lib::{
     LazyLoadBlob,
 };
 use serde_json;
-
-use crate::types::*;
+use shared_types::{MessageChannel, MessageType, AppState};
 use crate::log_message;
 use super::make_terminal_address;
 

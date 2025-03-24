@@ -7,6 +7,12 @@ import {
   MessageLog, 
   StatusResponse 
 } from "./types/types";
+import { 
+  fetchStatus,
+  fetchHistory,
+  clearHistory,
+  sendCustomMessage 
+} from "./utilities/api";
 
 const BASE_URL = import.meta.env.BASE_URL;
 if (window.our) window.our.process = BASE_URL?.replace("/", "");
@@ -107,147 +113,56 @@ function App() {
     // The WebSocket will automatically reconnect due to the useEffect dependency
   };
 
-  const fetchStatus = async () => {
-    try {
-      const response = await fetch(`${BASE_URL}/api/status`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json"
-        }
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || "Failed to fetch status");
-      }
-      
-      const data = await response.json();
-      console.log("Status response:", data);
-      
-      if (data.Status) {
-        setStatusData(data.Status);
-      } else {
-        console.error("Unexpected response format:", data);
-        throw new Error("Invalid response format");
-      }
-    } catch (error) {
-      console.error("Error fetching status:", error);
+  const handleFetchStatus = async () => {
+    const status = await fetchStatus();
+    if (status) {
+      setStatusData(status);
+    } else {
       setNodeConnected(false);
     }
   };
 
-  const fetchHistory = async () => {
-    try {
-      const response = await fetch(`${BASE_URL}/api/history`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json"
-        }
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || "Failed to fetch history");
-      }
-      
-      const data = await response.json();
-      console.log("History response:", data);
-      
-      if (data.History && Array.isArray(data.History.messages)) {
-        setHistoryData(data.History.messages);
-      } else {
-        console.error("Unexpected response format:", data);
-        throw new Error("Invalid response format");
-      }
-    } catch (error) {
-      console.error("Error fetching history:", error);
-    }
+  const handleFetchHistory = async () => {
+    const history = await fetchHistory();
+    setHistoryData(history);
   };
 
-  const clearHistory = async () => {
-    try {
-      // Create a properly formatted request
-      const requestData = {
-        ClearHistory: null
-      };
-      
-      // Use POST request to the API endpoint with a body
-      const response = await fetch(`${BASE_URL}/api`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(requestData)
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || "Failed to clear history");
-      }
-      
-      // Refresh history data
+  const handleClearHistory = async () => {
+    const success = await clearHistory();
+    if (success) {
       setHistoryData([]);
       setWsMessages(prev => [...prev, "History cleared"]);
-    } catch (error) {
-      console.error("Error clearing history:", error);
     }
   };
 
-  const sendCustomMessage = async (event: React.FormEvent) => {
+  const handleSendCustomMessage = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    if (!customMessage) return;
-
-    const requestData = {
+    const success = await sendCustomMessage(customMessage, customType, messageMethod, api);
+    if (success) {
+      setCustomMessage("");
+      setWsMessages(prev => [...prev, `Sent: ${JSON.stringify({
         CustomMessage: {
-            message_type: customType,
-            content: customMessage
+          message_type: customType,
+          content: customMessage
         }
-    };
-
-    try {
-        if (messageMethod === "websocket") {
-            // Send via WebSocket only
-            if (!api) {
-                throw new Error("WebSocket not connected");
-            }
-            api.send({ data: requestData });
-            setWsMessages(prev => [...prev, `Sent: ${JSON.stringify(requestData)}`]);
-        } else {
-            // Send via HTTP only
-            const response = await fetch(`${BASE_URL}/api`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify(requestData)
-            });
-            
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || "Failed to send custom message");
-            }
-        }
-        
-        setCustomMessage("");
-        
-        // Refresh data after sending a message
-        if (activeTab === "history") {
-            fetchHistory();
-        } else {
-            fetchStatus();
-        }
-    } catch (error) {
-        console.error("Error sending message:", error);
+      })}`]);
+      
+      // Refresh data after sending a message
+      if (activeTab === "history") {
+        handleFetchHistory();
+      } else {
+        handleFetchStatus();
+      }
     }
   };
 
   // When tab changes, fetch appropriate data
   useEffect(() => {
     if (activeTab === "history") {
-      fetchHistory();
+      handleFetchHistory();
     } else if (activeTab === "status") {
-      fetchStatus();
+      handleFetchStatus();
     }
   }, [activeTab]);
 
@@ -306,7 +221,7 @@ function App() {
           >
             <h3 style={{ marginTop: 0, textAlign: 'left' }}>Send Custom Message</h3>
             <form
-              onSubmit={sendCustomMessage}
+              onSubmit={handleSendCustomMessage}
               style={{
                 display: "flex",
                 flexDirection: "column",
@@ -358,7 +273,7 @@ function App() {
               <div>
                 <div className="header-row">
                   <h3>System Status</h3>
-                  <button onClick={fetchStatus}>Refresh</button>
+                  <button onClick={handleFetchStatus}>Refresh</button>
                 </div>
                 <pre style={{ textAlign: "left", maxHeight: "300px", overflow: "auto" }}>
                   {statusData ? JSON.stringify(statusData, null, 2) : "No data yet"}
@@ -371,8 +286,8 @@ function App() {
                 <div className="header-row">
                   <h3>Message History</h3>
                   <div>
-                    <button onClick={fetchHistory} style={{ marginRight: "10px" }}>Refresh</button>
-                    <button onClick={clearHistory}>Clear History</button>
+                    <button onClick={handleFetchHistory} style={{ marginRight: "10px" }}>Refresh</button>
+                    <button onClick={handleClearHistory}>Clear History</button>
                   </div>
                 </div>
                 <div style={{ maxHeight: "300px", overflow: "auto", textAlign: "left" }}>

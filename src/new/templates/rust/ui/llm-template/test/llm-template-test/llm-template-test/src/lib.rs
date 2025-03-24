@@ -1,9 +1,18 @@
-use crate::hyperware::process::llm_template::{LlmTemplateMessage, Request as LlmTemplateRequest, Response as LlmTemplateResponse, SendRequest};
 use crate::hyperware::process::tester::{Request as TesterRequest, Response as TesterResponse, RunRequest, FailResponse};
-
-use hyperware_process_lib::{await_message, call_init, print_to_terminal, println, Address, ProcessId, Request, Response};
-
+use hyperware_process_lib::{await_message, call_init, print_to_terminal, println, Address, ProcessId, Request, Response, kiprintln,
+    http::server::{
+        send_response, HttpServer, HttpServerRequest, StatusCode, send_ws_push, WsMessageType,
+    },
+    vfs::{create_drive, create_file, File},
+    our,
+};
+use shared_types::{MessageChannel, MessageType, MessageLog, ApiRequest, ApiResponse};
+mod utils;
+mod client_ops;
 mod tester_lib;
+
+use utils::*;
+use client_ops::*;
 
 wit_bindgen::generate!({
     path: "target/wit",
@@ -11,96 +20,116 @@ wit_bindgen::generate!({
     generate_unused_types: true,
     additional_derives: [PartialEq, serde::Deserialize, serde::Serialize, process_macros::SerdeJsonInto],
 });
-
-fn handle_message (our: &Address) -> anyhow::Result<()> {
-    let message = await_message().unwrap();
-
-    if !message.is_request() {
-        unimplemented!();
+fn handle_message(log_file: &mut File) -> anyhow::Result<()> {
+    kiprintln!("handle_message called");
+    
+    match run_tests(log_file) {
+        Ok(_) => {
+            kiprintln!("Tests completed successfully");
+            write_log(log_file, "Tests completed successfully")?;
+            Response::new()
+                .body(TesterResponse::Run(Ok(())))
+                .send()
+                .unwrap();
+            kiprintln!("Sent success response");
+        },
+        Err(e) => {
+            kiprintln!("Error running tests: {:?}", e);
+        }
     }
+
+    kiprintln!("handle_message completed");
+    Ok(())
+}
+fn init_tests(our: Address) -> anyhow::Result<Vec<String>> {
+    kiprintln!("Init tests called with our address: {}", our);
+    
+    let message = match await_message() {
+        Ok(msg) => msg,
+        Err(e) => {
+            kiprintln!("Error awaiting message: {:?}", e);
+            return Err(anyhow::anyhow!("Error awaiting message: {:?}", e));
+        }
+    };
+    
+    if !message.is_request() {
+        kiprintln!("Received message is not a request");
+        fail!("received-non-request");
+        // The fail! macro will panic, so this won't be reached
+    }
+
     let source = message.source();
+    kiprintln!("Message source: {:?}", source);
+    
     if our.node != source.node {
+        kiprintln!("Rejecting foreign message from {:?}", source);
         return Err(anyhow::anyhow!(
             "rejecting foreign Message from {:?}",
             source,
         ));
     }
-    let TesterRequest::Run(RunRequest {
-        input_node_names: node_names,
-        ..
-    }) = message.body().try_into()?;
-    print_to_terminal(0, "llm_template_test: a");
-    assert!(node_names.len() >= 2);
+
+    let request = match message.body().try_into() {
+        Ok(TesterRequest::Run(req)) => req,
+        Err(e) => {
+            fail!("error-parsing-message-body");
+            kiprintln!("Error parsing message body: {:?}", e);
+            return Err(anyhow::anyhow!("Error parsing message body: {:?}", e));
+        }
+    };
+    
+    let node_names = request.input_node_names;
+    kiprintln!("node_names: {:?}", node_names);
+    
+    if node_names.len() < 2 {
+        fail!("not-enough-nodes");
+    }
+    
     if our.node != node_names[0] {
+        kiprintln!("We are not the master node. Our: {}, master: {}", our.node, node_names[0]);
         // we are not master node: return
         Response::new()
             .body(TesterResponse::Run(Ok(())))
             .send()
             .unwrap();
+        return Ok(vec![]);
+    }
+    
+    kiprintln!("We are the master node, proceeding with test");
+    Ok(node_names)
+}
+
+fn run_tests(log_file: &mut File) -> anyhow::Result<()> {
+    let client_node_names = init_tests(our())?;
+    write_log(log_file, &format!("Found client nodes: {:?}", client_node_names))?;
+    
+    if client_node_names.is_empty() {
+        write_log(log_file, "No client nodes to test, exiting early")?;
         return Ok(());
     }
+    
+    let client_addresses = get_client_addresses(&client_node_names)?;
+    write_log(log_file, &format!("Client addresses: {:?}", client_addresses))?;
 
-    // we are master node
-
-    let our_llm_template_address = Address {
-        node: our.node.clone(),
-        process: ProcessId::new(Some("llm-template"), "llm-template", "template.os"),
-    };
-    let their_llm_template_address = Address {
-        node: node_names[1].clone(),
-        process: ProcessId::new(Some("llm-template"), "llm-template", "template.os"),
-    };
-
-    // Send
-    print_to_terminal(0, "llm_template_test: b");
-    let message: String = "hello".into();
-    let _ = Request::new()
-        .target(our_llm_template_address.clone())
-        .body(LlmTemplateRequest::Send(SendRequest {
-            target: node_names[1].clone(),
-            message: message.clone(),
-        }))
-        .send_and_await_response(15)?.unwrap();
-
-    // Get history from receiver & test
-    print_to_terminal(0, "llm_template_test: c");
-    let response = Request::new()
-        .target(their_llm_template_address.clone())
-        .body(LlmTemplateRequest::History(our.node.clone()))
-        .send_and_await_response(15)?.unwrap();
-    if response.is_request() { fail!("llm_template_test"); };
-    let LlmTemplateResponse::History(messages) = response.body().try_into()? else {
-        fail!("llm_template_test");
-    };
-    let expected_messages = vec![LlmTemplateMessage {
-        author: our.node.clone(),
-        content: message,
-    }];
-
-    if messages != expected_messages {
-        println!("{messages:?} != {expected_messages:?}");
-        fail!("llm_template_test");
-    }
-
-    Response::new()
-        .body(TesterResponse::Run(Ok(())))
-        .send()
-        .unwrap();
+    write_log(log_file, "----------------------------------------")?;
+    write_log(log_file, "Starting client operations")?;
+    run_client_ops(log_file, &client_addresses)?;
+    write_log(log_file, "----------------------------------------")?;
+    write_log(log_file, "Done running client operations")?;
 
     Ok(())
 }
 
 call_init!(init);
-fn init(our: Address) {
-    print_to_terminal(0, "begin");
+fn init(_our: Address) -> anyhow::Result<()> {
+    let mut log_file = create_log_file()?;
 
     loop {
-        match handle_message(&our) {
+        match handle_message(&mut log_file) {
             Ok(()) => {},
             Err(e) => {
-                print_to_terminal(0, format!("llm_template_test: error: {e:?}").as_str());
-
-                fail!("llm_template_test");
+                print_to_terminal(0, format!("sample_test_app_test: error: {e:?}").as_str());
+                fail!("sample_test_app_test");
             },
         };
     }

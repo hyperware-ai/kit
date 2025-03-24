@@ -11,9 +11,7 @@ use hyperware_process_lib::{
     },
     Address, Message
 };
-
-mod types;
-use types::*;
+use shared_types::{MessageChannel, MessageType, MessageLog, ApiRequest, ApiResponse, AppConfig, AppState};
 
 mod message_handlers;
 use message_handlers::*;
@@ -121,6 +119,13 @@ fn handle_message(
         // Handling external messages (messages from other applications/hyperdrives)
         source => {
             kiprintln!("got external message");
+            log_message(
+                state,
+                "System".to_string(),
+                MessageChannel::External,
+                MessageType::Other("External message".to_string()),
+                Some(format!("got external message from: {:?}", source)),
+            );
             handle_external_message(
                 source, 
                 message.body(), 

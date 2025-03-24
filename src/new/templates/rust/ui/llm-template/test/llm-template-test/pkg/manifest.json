@@ -5,10 +5,12 @@
         "on_exit": "Restart",
         "request_networking": false,
         "request_capabilities": [
-            "llm-template:llm-template:template.os"
+            "llm-template:llm-template:template.os",
+            "vfs:distro:sys"
         ],
         "grant_capabilities": [
-            "llm-template:llm-template:template.os"
+            "llm-template:llm-template:template.os",
+            "vfs:distro:sys"
         ],
         "public": true
     }

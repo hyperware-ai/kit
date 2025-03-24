@@ -1,6 +1,6 @@
 runtime = { FetchVersion = "latest" }
 # runtime = { RepoPath = "~/git/hyperdrive" }
-persist_home = false
+persist_home = true
 runtime_build_release = false
 always_print_node_output = false
 
@@ -13,17 +13,23 @@ setup_packages = [
 setup_scripts = []
 test_package_paths = ["llm-template-test"]
 test_scripts = []
-timeout_secs = 5
+timeout_secs = 100
 fakechain_router = 8545
 
 [[tests.nodes]]
 port = 8080
-home = "home/first"
-fake_node_name = "first.dev"
+home = "llm-template-test/results/client0"
+fake_node_name = "client0.os"
 runtime_verbosity = 2
 
 [[tests.nodes]]
 port = 8081
-home = "home/second"
-fake_node_name = "second.dev"
+home = "llm-template-test/results/client1"
+fake_node_name = "client1.os"
+runtime_verbosity = 2
+
+[[tests.nodes]]
+port = 8082
+home = "llm-template-test/results/client1"
+fake_node_name = "client2.os"
 runtime_verbosity = 2

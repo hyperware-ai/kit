@@ -9,7 +9,6 @@ pub use handle_hyperware::{
 };
 
 #[allow(unused_imports)]
-use crate::types::*;
 use hyperware_process_lib::Address;
 
 // Helper functions for address creation

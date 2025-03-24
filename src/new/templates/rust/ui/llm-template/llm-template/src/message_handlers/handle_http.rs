@@ -9,8 +9,7 @@ use hyperware_process_lib::{
     LazyLoadBlob, last_blob,
 };
 use anyhow::anyhow;
-
-use crate::types::*;
+use shared_types::{MessageChannel, MessageType, ApiRequest, ApiResponse, AppState};
 use crate::log_message;
 
 pub fn handle_http_server_request(
