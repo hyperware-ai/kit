@@ -19,13 +19,13 @@ always_print_node_output = false
 # [[tests.nodes]]
 # port = 8080
 # home = "home/first"
-# fake_node_name = "first.dev"
+# fake_node_name = "first.os"
 # runtime_verbosity = 2
 #
 # [[tests.nodes]]
 # port = 8081
 # home = "home/second"
-# fake_node_name = "second.dev"
+# fake_node_name = "second.os"
 # runtime_verbosity = 2
 #
 #
@@ -43,7 +43,7 @@ always_print_node_output = false
 # [[tests.nodes]]
 # port = 8080
 # home = "home/first"
-# fake_node_name = "first.dev"
+# fake_node_name = "first.os"
 # runtime_verbosity = 2
 #
 #
@@ -61,7 +61,7 @@ always_print_node_output = false
 # [[tests.nodes]]
 # port = 8080
 # home = "home/first"
-# fake_node_name = "first.dev"
+# fake_node_name = "first.os"
 # runtime_verbosity = 2
 #
 #
@@ -79,13 +79,13 @@ always_print_node_output = false
 # [[tests.nodes]]
 # port = 8080
 # home = "home/first"
-# fake_node_name = "first.dev"
+# fake_node_name = "first.os"
 # runtime_verbosity = 2
 #
 # [[tests.nodes]]
 # port = 8081
 # home = "home/second"
-# fake_node_name = "second.dev"
+# fake_node_name = "second.os"
 # runtime_verbosity = 2
 #
 #
@@ -103,7 +103,7 @@ always_print_node_output = false
 # [[tests.nodes]]
 # port = 8080
 # home = "home/first"
-# fake_node_name = "first.dev"
+# fake_node_name = "first.os"
 # runtime_verbosity = 2
 #
 #
@@ -121,7 +121,7 @@ always_print_node_output = false
 # [[tests.nodes]]
 # port = 8080
 # home = "home/first"
-# fake_node_name = "first.dev"
+# fake_node_name = "first.os"
 # runtime_verbosity = 2
 
 
@@ -139,13 +139,13 @@ fakechain_router = 8545
 [[tests.nodes]]
 port = 8080
 home = "home/first"
-fake_node_name = "first.dev"
+fake_node_name = "first.os"
 runtime_verbosity = 2
 
 [[tests.nodes]]
 port = 8081
 home = "home/second"
-fake_node_name = "second.dev"
+fake_node_name = "second.os"
 runtime_verbosity = 2
 
 
@@ -163,7 +163,7 @@ fakechain_router = 8545
 [[tests.nodes]]
 port = 8080
 home = "home/first"
-fake_node_name = "first.dev"
+fake_node_name = "first.os"
 runtime_verbosity = 2
 
 
@@ -181,7 +181,7 @@ fakechain_router = 8545
 [[tests.nodes]]
 port = 8080
 home = "home/first"
-fake_node_name = "first.dev"
+fake_node_name = "first.os"
 runtime_verbosity = 2
 
 
@@ -198,11 +198,11 @@ runtime_verbosity = 2
 # [[tests.nodes]]
 # port = 8080
 # home = "home/first"
-# fake_node_name = "first.dev"
+# fake_node_name = "first.os"
 # runtime_verbosity = 2
 #
 # [[tests.nodes]]
 # port = 8081
 # home = "home/second"
-# fake_node_name = "second.dev"
+# fake_node_name = "second.os"
 # runtime_verbosity = 2

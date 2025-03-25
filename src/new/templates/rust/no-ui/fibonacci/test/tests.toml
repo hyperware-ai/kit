@@ -19,5 +19,5 @@ fakechain_router = 8545
 [[tests.nodes]]
 port = 8080
 home = "home/first"
-fake_node_name = "first.dev"
+fake_node_name = "first.os"
 runtime_verbosity = 2
