@@ -257,7 +257,7 @@ fn check_rust_toolchains_targets() -> Result<Vec<Dependency>> {
 
     let has_wasm32_wasi = output
         .split('\n')
-        .fold(false, |acc, item| acc || item == "wasm32-wasip1");
+        .fold(false, |acc, item| acc || item.contains("wasm32-wasip1"));
 
     if !has_wasm32_wasi {
         missing_deps.push(Dependency::RustWasm32Wasi);
