@@ -33,7 +33,7 @@ struct NewMessage {
 type MessageArchive = HashMap<String, Vec<ChatMessage>>;
 
 fn make_http_address(our: &Address) -> Address {
-    Address::from((our.node(), "http_server", "distro", "sys"))
+    Address::from((our.node(), "http-server", "distro", "sys"))
 }
 
 fn handle_http_server_request(
@@ -44,7 +44,7 @@ fn handle_http_server_request(
 ) -> anyhow::Result<()> {
     let Ok(request) = serde_json::from_slice::<HttpServerRequest>(body) else {
         // Fail quietly if we can't parse the request
-        info!("couldn't parse message from http_server: {body:?}");
+        info!("couldn't parse message from http-server: {body:?}");
         return Ok(());
     };
 
