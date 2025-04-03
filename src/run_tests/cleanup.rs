@@ -108,7 +108,10 @@ pub async fn cleanup(
             //  for `run-tests` that exited early by, e.g., a user input
             //  Ctrl+C.
             if let Err(e) = nix::unistd::write(master_fd.as_raw_fd(), b"\x03") {
-                error!("failed to send SIGINT to node: {:?}", e);
+                match e {
+                    nix::Error::EIO => {}
+                    _ => error!("failed to send SIGINT to node: {:?}", e),
+                }
             }
         } else {
             clean_process_by_pid(*process_id);
