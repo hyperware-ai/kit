@@ -1763,7 +1763,8 @@ pub async fn execute(
 
     if hyperapp {
         let api_dir = live_dir.join("api");
-        let (_processed_projects, _interfaces) = wit_generator::generate_wit_files(&live_dir, &api_dir)?;
+        let (_processed_projects, _interfaces) =
+            wit_generator::generate_wit_files(&live_dir, &api_dir)?;
     }
 
     let ui_dirs = get_ui_dirs(&live_dir, &include, &exclude)?;
