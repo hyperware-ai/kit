@@ -32,6 +32,8 @@ use crate::KIT_CACHE;
 mod rewrite;
 use rewrite::copy_and_rewrite_package;
 
+mod wit_generator;
+
 const PY_VENV_NAME: &str = "process_env";
 const JAVASCRIPT_SRC_PATH: &str = "src/lib.js";
 const PYTHON_SRC_PATH: &str = "src/lib.py";
@@ -1161,6 +1163,7 @@ async fn fetch_dependencies(
     include: &HashSet<PathBuf>,
     exclude: &HashSet<PathBuf>,
     rewrite: bool,
+    hyperapp: bool,
     force: bool,
     verbose: bool,
 ) -> Result<()> {
@@ -1178,6 +1181,7 @@ async fn fetch_dependencies(
         vec![], // TODO: what about deps-of-deps?
         vec![],
         rewrite,
+        hyperapp,
         false,
         force,
         verbose,
@@ -1215,6 +1219,7 @@ async fn fetch_dependencies(
             local_dep_deps,
             vec![],
             rewrite,
+            hyperapp,
             false,
             force,
             verbose,
@@ -1531,6 +1536,7 @@ async fn compile_package(
     include: &HashSet<PathBuf>,
     exclude: &HashSet<PathBuf>,
     rewrite: bool,
+    hyperapp: bool,
     force: bool,
     verbose: bool,
     ignore_deps: bool, // for internal use; may cause problems when adding recursive deps
@@ -1554,6 +1560,7 @@ async fn compile_package(
             include,
             exclude,
             rewrite,
+            hyperapp,
             force,
             verbose,
         )
@@ -1661,6 +1668,7 @@ pub async fn execute(
     local_dependencies: Vec<PathBuf>,
     add_paths_to_api: Vec<PathBuf>,
     rewrite: bool,
+    hyperapp: bool,
     reproducible: bool,
     force: bool,
     verbose: bool,
@@ -1753,6 +1761,11 @@ pub async fn execute(
         copy_and_rewrite_package(package_dir)?
     };
 
+    if hyperapp {
+        let api_dir = live_dir.join("api");
+        let (_processed_projects, _interfaces) = wit_generator::generate_wit_files(&live_dir, &api_dir)?;
+    }
+
     let ui_dirs = get_ui_dirs(&live_dir, &include, &exclude)?;
     if !no_ui && !ui_dirs.is_empty() {
         if !skip_deps_check {
@@ -1779,6 +1792,7 @@ pub async fn execute(
             &include,
             &exclude,
             rewrite,
+            hyperapp,
             force,
             verbose,
             ignore_deps,
