@@ -204,7 +204,7 @@ fn call_with_nvm(arg: &str, verbose: bool) -> Result<()> {
 #[instrument(level = "trace", skip_all)]
 fn call_rustup(arg: &str, verbose: bool) -> Result<()> {
     run_command(
-        Command::new("bash").args(&["-c", &format!("rustup {}", arg)]),
+        Command::new("bash").args(&["-c", &format!("rustup +stable {}", arg)]),
         verbose,
     )?;
     Ok(())
@@ -453,7 +453,18 @@ pub async fn get_deps(
     // Process the response
     let response = tokio::select! {
         Some(response) = receiver.recv() => response,
-        _ = recv_kill.recv() => return Err(eyre!("got exit code")),
+        k = recv_kill.recv() => {
+            match k {
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    // some systems drop the fake sender produced in build/mod.rs:57
+                    //  make_fake_kill_chan() and so we handle this by ignoring the
+                    //  Closed message that comes through
+                    //  https://docs.rs/tokio/latest/tokio/sync/broadcast/struct.Receiver.html#method.recv
+                    receiver.recv().await.unwrap()
+                }
+                _ => return Err(eyre!("got exit code")),
+            }
+        }
     };
     let response = response.trim().to_lowercase();
     match response.as_str() {
