@@ -1,10 +1,9 @@
-//use anyhow::{Context};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use color_eyre::{
-    eyre::{bail, WrapErr},
+    eyre::{bail, eyre, WrapErr},
     Result,
 };
 use syn::{self, Attribute, ImplItem, Item, Type};
@@ -109,13 +108,17 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
     match ty {
         Type::Path(type_path) => {
             if type_path.path.segments.is_empty() {
-                return Ok("unknown".to_string());
+                return Err(eyre!("Failed to parse path type: {ty:?}"));
             }
 
             let ident = &type_path.path.segments.last().unwrap().ident;
             let type_name = ident.to_string();
 
             match type_name.as_str() {
+                "i8" => Ok("s8".to_string()),
+                "u8" => Ok("u8".to_string()),
+                "i16" => Ok("s16".to_string()),
+                "u16" => Ok("u16".to_string()),
                 "i32" => Ok("s32".to_string()),
                 "u32" => Ok("u32".to_string()),
                 "i64" => Ok("s64".to_string()),
@@ -132,10 +135,10 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                             let inner_type = rust_type_to_wit(inner_ty, used_types)?;
                             Ok(format!("list<{}>", inner_type))
                         } else {
-                            Ok("list<any>".to_string())
+                            Err(eyre!("Failed to parse Vec inner type"))
                         }
                     } else {
-                        Ok("list<any>".to_string())
+                        Err(eyre!("Failed to parse Vec inner type!"))
                     }
                 }
                 "Option" => {
@@ -146,36 +149,37 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                             let inner_type = rust_type_to_wit(inner_ty, used_types)?;
                             Ok(format!("option<{}>", inner_type))
                         } else {
-                            Ok("option<any>".to_string())
+                            Err(eyre!("Failed to parse Option inner type"))
                         }
                     } else {
-                        Ok("option<any>".to_string())
+                        Err(eyre!("Failed to parse Option inner type!"))
                     }
                 }
-                "HashMap" | "BTreeMap" => {
-                    if let syn::PathArguments::AngleBracketed(args) =
-                        &type_path.path.segments.last().unwrap().arguments
-                    {
-                        if args.args.len() >= 2 {
-                            if let (
-                                Some(syn::GenericArgument::Type(key_ty)),
-                                Some(syn::GenericArgument::Type(val_ty)),
-                            ) = (args.args.first(), args.args.get(1))
-                            {
-                                let key_type = rust_type_to_wit(key_ty, used_types)?;
-                                let val_type = rust_type_to_wit(val_ty, used_types)?;
-                                // For HashMaps, we'll generate a list of tuples where each tuple contains a key and value
-                                Ok(format!("list<tuple<{}, {}>>", key_type, val_type))
-                            } else {
-                                Ok("list<tuple<string, any>>".to_string())
-                            }
-                        } else {
-                            Ok("list<tuple<string, any>>".to_string())
-                        }
-                    } else {
-                        Ok("list<tuple<string, any>>".to_string())
-                    }
-                }
+                // TODO: fix and enable
+                //"HashMap" | "BTreeMap" => {
+                //    if let syn::PathArguments::AngleBracketed(args) =
+                //        &type_path.path.segments.last().unwrap().arguments
+                //    {
+                //        if args.args.len() >= 2 {
+                //            if let (
+                //                Some(syn::GenericArgument::Type(key_ty)),
+                //                Some(syn::GenericArgument::Type(val_ty)),
+                //            ) = (args.args.first(), args.args.get(1))
+                //            {
+                //                let key_type = rust_type_to_wit(key_ty, used_types)?;
+                //                let val_type = rust_type_to_wit(val_ty, used_types)?;
+                //                // For HashMaps, we'll generate a list of tuples where each tuple contains a key and value
+                //                Ok(format!("list<tuple<{}, {}>>", key_type, val_type))
+                //            } else {
+                //                Ok("list<tuple<string, any>>".to_string())
+                //            }
+                //        } else {
+                //            Ok("list<tuple<string, any>>".to_string())
+                //        }
+                //    } else {
+                //        Ok("list<tuple<string, any>>".to_string())
+                //    }
+                //}
                 custom => {
                     // Validate custom type name
                     validate_name(custom, "Type")?;
@@ -204,7 +208,7 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                 Ok(format!("tuple<{}>", elem_types.join(", ")))
             }
         }
-        _ => Ok("unknown".to_string()),
+        _ => return Err(eyre!("Failed to parse type: {ty:?}")),
     }
 }
 
@@ -296,7 +300,7 @@ fn collect_type_definitions_from_file(file_path: &Path) -> Result<HashMap<String
                                                             "    Error converting field type: {}",
                                                             e
                                                         );
-                                                        "unknown".to_string()
+                                                        return Err(e);
                                                     }
                                                 };
 
@@ -391,8 +395,7 @@ fn collect_type_definitions_from_file(file_path: &Path) -> Result<HashMap<String
                                                         "    Error converting variant type: {}",
                                                         e
                                                     );
-                                                    skip_enum = true;
-                                                    break;
+                                                    return Err(e);
                                                 }
                                             }
                                         }
@@ -554,15 +557,13 @@ fn generate_signature_struct(
                             }
                             Err(e) => {
                                 println!("    Error converting parameter type: {}", e);
-                                // Use a placeholder type for this parameter
-                                struct_fields.push(format!("        {}: unknown", param_name));
+                                return Err(e);
                             }
                         }
                     }
                     Err(e) => {
                         println!("    Skipping parameter with invalid name: {}", e);
-                        // Use a placeholder for invalid parameter names
-                        struct_fields.push("        invalid-param: unknown".to_string());
+                        return Err(e);
                     }
                 }
             }
@@ -577,7 +578,7 @@ fn generate_signature_struct(
             }
             Err(e) => {
                 println!("    Error converting return type: {}", e);
-                struct_fields.push("        returning: unknown".to_string());
+                return Err(e);
             }
         },
         _ => {
