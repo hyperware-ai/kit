@@ -613,7 +613,7 @@ impl AsTypePath for syn::Type {
 }
 
 // Process a single Rust project and generate WIT files
-fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<String>> {
+fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(String, String)>> {
     println!("\nProcessing project: {}", project_path.display());
 
     // Find lib.rs for this project
@@ -864,60 +864,24 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<St
         }
     }
 
-    if let (Some(_), Some(_), Some(kebab_iface)) = (wit_world, interface_name, kebab_interface_name)
+    if let (Some(wit_world), Some(_), Some(kebab_iface)) =
+        (wit_world, interface_name, kebab_interface_name)
     {
         println!("Returning import statement for interface {}", kebab_iface);
         // Use kebab-case interface name for import
-        Ok(Some(format!("    import {};", kebab_iface)))
+        Ok(Some((format!("    import {};", kebab_iface), wit_world)))
     } else {
         println!("No valid interface found");
         Ok(None)
     }
 }
 
-// Generate WIT files from Rust code
-pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBuf>, Vec<String>)> {
-    // Find all relevant Rust projects
-    let projects = find_rust_projects(base_dir);
-    let mut processed_projects = Vec::new();
-
-    if projects.is_empty() {
-        println!("No relevant Rust projects found.");
-        return Ok((Vec::new(), Vec::new()));
-    }
-
-    // Process each project and collect world imports
-    let mut new_imports = Vec::new();
-    let mut interfaces = Vec::new();
-
-    for project_path in &projects {
-        println!("Processing project: {}", project_path.display());
-
-        match process_rust_project(project_path, api_dir) {
-            Ok(Some(import)) => {
-                println!("Got import statement: {}", import);
-                new_imports.push(import.clone());
-
-                // Extract interface name from import statement
-                let interface_name = import
-                    .trim_start_matches("    import ")
-                    .trim_end_matches(";")
-                    .to_string();
-
-                interfaces.push(interface_name);
-                processed_projects.push(project_path.clone());
-            }
-            Ok(None) => println!("No import statement generated"),
-            Err(e) => println!("Error processing project: {}", e),
-        }
-    }
-
-    println!("Collected {} new imports", new_imports.len());
-
-    // Check for existing world definition files and update them
-    println!("Looking for existing world definition files");
-    let mut updated_world = false;
-
+fn rewrite_wit(
+    api_dir: &Path,
+    new_imports: &Vec<String>,
+    wit_worlds: &mut HashSet<String>,
+    updated_world: &mut bool,
+) -> Result<()> {
     for entry in WalkDir::new(api_dir)
         .max_depth(1)
         .into_iter()
@@ -955,61 +919,145 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
                     if let Some(world_name) = world_name {
                         println!("Extracted world name: {}", world_name);
 
-                        // Determine the include line based on world name
-                        // If world name starts with "types-", use "include lib;" instead
-                        if world_name.starts_with("types-") {
-                            include_line = "    include lib;".to_string();
-                        } else {
-                            // Keep existing include or default to process-v1
-                            if !include_line.contains("include ") {
-                                include_line = "    include process-v1;".to_string();
-                            }
-                        }
-
-                        // Combine existing imports with new imports
-                        let mut all_imports = existing_imports.clone();
-
-                        for import in &new_imports {
-                            let import_stmt = import.trim();
-                            if !all_imports.iter().any(|i| i.trim() == import_stmt) {
-                                all_imports.push(import_stmt.to_string());
-                            }
-                        }
-
-                        // Make sure all imports have proper indentation
-                        let all_imports_with_indent: Vec<String> = all_imports
-                            .iter()
-                            .map(|import| {
-                                if import.starts_with("    ") {
-                                    import.clone()
-                                } else {
-                                    format!("    {}", import.trim())
+                        // Check if this world name matches the one we're looking for
+                        if wit_worlds.remove(&world_name) {
+                            // Determine the include line based on world name
+                            // If world name starts with "types-", use "include lib;" instead
+                            if world_name.starts_with("types-") {
+                                include_line = "    include lib;".to_string();
+                            } else {
+                                // Keep existing include or default to process-v1
+                                if !include_line.contains("include ") {
+                                    include_line = "    include process-v1;".to_string();
                                 }
-                            })
-                            .collect();
+                            }
 
-                        let imports_section = all_imports_with_indent.join("\n");
+                            // Combine existing imports with new imports
+                            let mut all_imports = existing_imports.clone();
 
-                        // Create updated world content with proper indentation
-                        let world_content = format!(
-                            "world {} {{\n{}\n    {}\n}}",
-                            world_name,
-                            imports_section,
-                            include_line.trim()
-                        );
+                            for import in new_imports {
+                                let import_stmt = import.trim();
+                                if !all_imports.iter().any(|i| i.trim() == import_stmt) {
+                                    all_imports.push(import_stmt.to_string());
+                                }
+                            }
 
-                        println!("Writing updated world definition to {}", path.display());
-                        // Write the updated world file
-                        fs::write(path, world_content).with_context(|| {
-                            format!("Failed to write updated world file: {}", path.display())
-                        })?;
+                            // Make sure all imports have proper indentation
+                            let all_imports_with_indent: Vec<String> = all_imports
+                                .iter()
+                                .map(|import| {
+                                    if import.starts_with("    ") {
+                                        import.clone()
+                                    } else {
+                                        format!("    {}", import.trim())
+                                    }
+                                })
+                                .collect();
 
-                        println!("Successfully updated world definition");
-                        updated_world = true;
+                            let imports_section = all_imports_with_indent.join("\n");
+
+                            // Create updated world content with proper indentation
+                            let world_content = format!(
+                                "world {} {{\n{}\n    {}\n}}",
+                                world_name,
+                                imports_section,
+                                include_line.trim()
+                            );
+
+                            println!("Writing updated world definition to {}", path.display());
+                            // Write the updated world file
+                            fs::write(path, world_content).with_context(|| {
+                                format!("Failed to write updated world file: {}", path.display())
+                            })?;
+
+                            println!("Successfully updated world definition");
+                            *updated_world = true;
+                        }
                     }
                 }
             }
         }
+    }
+    Ok(())
+}
+
+// Generate WIT files from Rust code
+pub fn generate_wit_files(
+    base_dir: &Path,
+    api_dir: &Path,
+    is_recursive_call: bool,
+) -> Result<(Vec<PathBuf>, Vec<String>)> {
+    fs::create_dir_all(&api_dir)?;
+
+    // Find all relevant Rust projects
+    let projects = find_rust_projects(base_dir);
+    let mut processed_projects = Vec::new();
+
+    if projects.is_empty() {
+        println!("No relevant Rust projects found.");
+        return Ok((Vec::new(), Vec::new()));
+    }
+
+    // Process each project and collect world imports
+    let mut new_imports = Vec::new();
+    let mut interfaces = Vec::new();
+
+    let mut wit_worlds = HashSet::new();
+    for project_path in &projects {
+        println!("Processing project: {}", project_path.display());
+
+        match process_rust_project(project_path, api_dir) {
+            Ok(Some((import, wit_world))) => {
+                println!("Got import statement: {}", import);
+                new_imports.push(import.clone());
+
+                // Extract interface name from import statement
+                let interface_name = import
+                    .trim_start_matches("    import ")
+                    .trim_end_matches(";")
+                    .to_string();
+
+                interfaces.push(interface_name);
+                processed_projects.push(project_path.clone());
+
+                wit_worlds.insert(wit_world);
+            }
+            Ok(None) => println!("No import statement generated"),
+            Err(e) => println!("Error processing project: {}", e),
+        }
+    }
+
+    println!("Collected {} new imports", new_imports.len());
+
+    // Check for existing world definition files and update them
+    println!("Looking for existing world definition files");
+    let mut updated_world = false;
+
+    rewrite_wit(api_dir, &new_imports, &mut wit_worlds, &mut updated_world)?;
+
+    let rerun_rewrite_wit = !wit_worlds.is_empty();
+    for wit_world in wit_worlds {
+        // Create a new file with the simple world definition
+        let new_file_path = api_dir.join(format!("{}.wit", wit_world));
+        let simple_world_content = format!("world {} {{}}", wit_world);
+
+        println!(
+            "Creating new world definition file: {}",
+            new_file_path.display()
+        );
+        fs::write(&new_file_path, simple_world_content).with_context(|| {
+            format!(
+                "Failed to create new world file: {}",
+                new_file_path.display()
+            )
+        })?;
+
+        println!("Successfully created new world definition file");
+        updated_world = true;
+    }
+
+    if rerun_rewrite_wit && !is_recursive_call {
+        return generate_wit_files(base_dir, api_dir, true);
     }
 
     // If no world definitions were found, create a default one
