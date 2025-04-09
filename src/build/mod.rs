@@ -32,6 +32,7 @@ use crate::KIT_CACHE;
 mod rewrite;
 use rewrite::copy_and_rewrite_package;
 
+mod caller_utils_generator;
 mod wit_generator;
 
 const PY_VENV_NAME: &str = "process_env";
@@ -1092,29 +1093,21 @@ async fn build_wit_dir(
 async fn compile_package_item(
     path: PathBuf,
     features: String,
-    apis: HashMap<String, Vec<u8>>,
     world: String,
-    wit_version: Option<u32>,
+    is_rust_process: bool,
+    is_py_process: bool,
+    is_js_process: bool,
     verbose: bool,
 ) -> Result<()> {
-    if path.is_dir() {
-        let is_rust_process = path.join(RUST_SRC_PATH).exists();
-        let is_py_process = path.join(PYTHON_SRC_PATH).exists();
-        let is_js_process = path.join(JAVASCRIPT_SRC_PATH).exists();
-        if is_rust_process || is_py_process || is_js_process {
-            build_wit_dir(&path, &apis, wit_version).await?;
-        }
-
-        if is_rust_process {
-            compile_rust_wasm_process(&path, &features, verbose).await?;
-        } else if is_py_process {
-            let python = get_python_version(None, None)?
-                .ok_or_else(|| eyre!("kit requires Python 3.10 or newer"))?;
-            compile_python_wasm_process(&path, &python, &world, verbose).await?;
-        } else if is_js_process {
-            let valid_node = get_newest_valid_node_version(None, None)?;
-            compile_javascript_wasm_process(&path, valid_node, &world, verbose).await?;
-        }
+    if is_rust_process {
+        compile_rust_wasm_process(&path, &features, verbose).await?;
+    } else if is_py_process {
+        let python = get_python_version(None, None)?
+            .ok_or_else(|| eyre!("kit requires Python 3.10 or newer"))?;
+        compile_python_wasm_process(&path, &python, &world, verbose).await?;
+    } else if is_js_process {
+        let valid_node = get_newest_valid_node_version(None, None)?;
+        compile_javascript_wasm_process(&path, valid_node, &world, verbose).await?;
     }
     Ok(())
 }
@@ -1539,6 +1532,7 @@ async fn compile_package(
     hyperapp: bool,
     force: bool,
     verbose: bool,
+    hyperapp_processed_projects: Option<Vec<PathBuf>>,
     ignore_deps: bool, // for internal use; may cause problems when adding recursive deps
 ) -> Result<()> {
     let metadata = read_and_update_metadata(package_dir)?;
@@ -1546,7 +1540,9 @@ async fn compile_package(
     let (mut apis, dependencies) =
         check_and_populate_dependencies(package_dir, &metadata, skip_deps_check, verbose).await?;
 
+    info!("dependencies: {dependencies:?}");
     if !ignore_deps && !dependencies.is_empty() {
+        info!("fetching dependencies...");
         fetch_dependencies(
             package_dir,
             &dependencies.iter().map(|s| s.to_string()).collect(),
@@ -1564,7 +1560,7 @@ async fn compile_package(
             force,
             verbose,
         )
-        .await?;
+        .await?
     }
 
     let wit_world = default_world
@@ -1575,6 +1571,7 @@ async fn compile_package(
 
     let mut tasks = tokio::task::JoinSet::new();
     let features = features.to_string();
+    let mut to_compile = HashSet::new();
     for entry in fs::read_dir(package_dir)? {
         let Ok(entry) = entry else {
             continue;
@@ -1583,12 +1580,45 @@ async fn compile_package(
         if !is_cluded(&path, include, exclude) {
             continue;
         }
+        if !path.is_dir() {
+            continue;
+        }
+
+        let is_rust_process = path.join(RUST_SRC_PATH).exists();
+        let is_py_process = path.join(PYTHON_SRC_PATH).exists();
+        let is_js_process = path.join(JAVASCRIPT_SRC_PATH).exists();
+        if is_rust_process || is_py_process || is_js_process {
+            build_wit_dir(&path, &apis, metadata.properties.wit_version).await?;
+        } else {
+            continue;
+        }
+        to_compile.insert((path, is_rust_process, is_py_process, is_js_process));
+    }
+
+    // TODO: move process/target/wit -> target/wit
+    if !ignore_deps && !dependencies.is_empty() {
+        info!("{hyperapp_processed_projects:?}");
+        if let Some(ref processed_projects) = hyperapp_processed_projects {
+            for processed_project in processed_projects {
+                let api_dir = processed_project.join("target").join("wit");
+                info!("{processed_project:?} {api_dir:?}");
+                caller_utils_generator::create_caller_utils(
+                    package_dir,
+                    &api_dir,
+                    &[processed_project.clone()],
+                )?;
+            }
+        }
+    }
+
+    for (path, is_rust_process, is_py_process, is_js_process) in to_compile {
         tasks.spawn(compile_package_item(
             path,
             features.clone(),
-            apis.clone(),
             wit_world.clone(),
-            metadata.properties.wit_version,
+            is_rust_process,
+            is_py_process,
+            is_js_process,
             verbose.clone(),
         ));
     }
@@ -1761,11 +1791,18 @@ pub async fn execute(
         copy_and_rewrite_package(package_dir)?
     };
 
-    if hyperapp {
+    let hyperapp_processed_projects = if !hyperapp {
+        None
+    } else {
         let api_dir = live_dir.join("api");
-        let (_processed_projects, _interfaces) =
+        let (processed_projects, interfaces) =
             wit_generator::generate_wit_files(&live_dir, &api_dir, false)?;
-    }
+        if interfaces.is_empty() {
+            None
+        } else {
+            Some(processed_projects)
+        }
+    };
 
     let ui_dirs = get_ui_dirs(&live_dir, &include, &exclude)?;
     if !no_ui && !ui_dirs.is_empty() {
@@ -1796,6 +1833,7 @@ pub async fn execute(
             hyperapp,
             force,
             verbose,
+            hyperapp_processed_projects,
             ignore_deps,
         )
         .await?;
