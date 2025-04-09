@@ -1,7 +1,12 @@
-use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use color_eyre::{
+    eyre::{bail, WrapErr},
+    Result,
+};
+
 use toml::Value;
 use walkdir::WalkDir;
 
@@ -29,9 +34,8 @@ pub fn to_pascal_case(s: &str) -> String {
 }
 
 // Find the world name in the world WIT file, prioritizing types-prefixed worlds
-fn find_world_name(api_dir: &Path) -> Result<String> {
-    let mut regular_world_name = None;
-    let mut types_world_name = None;
+fn find_world_names(api_dir: &Path) -> Result<Vec<String>> {
+    let mut world_names = Vec::new();
 
     // Look for world definition files
     for entry in WalkDir::new(api_dir)
@@ -60,11 +64,8 @@ fn find_world_name(api_dir: &Path) -> Result<String> {
 
                             // Check if this is a types-prefixed world
                             if clean_name.starts_with("types-") {
-                                types_world_name = Some(clean_name.to_string());
+                                world_names.push(clean_name.to_string());
                                 println!("Found types world: {}", clean_name);
-                            } else {
-                                regular_world_name = Some(clean_name.to_string());
-                                println!("Found regular world: {}", clean_name);
                             }
                         }
                     }
@@ -73,32 +74,10 @@ fn find_world_name(api_dir: &Path) -> Result<String> {
         }
     }
 
-    // Prioritize types-prefixed world if found
-    if let Some(types_name) = types_world_name {
-        return Ok(types_name);
+    if world_names.is_empty() {
+        bail!("No world name found in any WIT file. Cannot generate caller-utils without a world name.")
     }
-
-    // If no types-prefixed world found, check if we have a regular world
-    if let Some(regular_name) = regular_world_name {
-        // Check if there's a corresponding types-prefixed world file
-        let types_name = format!("types-{}", regular_name);
-        let types_file = api_dir.join(format!("{}.wit", types_name));
-
-        if types_file.exists() {
-            println!("Found types world from file: {}", types_name);
-            return Ok(types_name);
-        }
-
-        // Fall back to regular world but print a warning
-        println!(
-            "Warning: No types- world found, using regular world: {}",
-            regular_name
-        );
-        return Ok(regular_name);
-    }
-
-    // If no world name is found, we should fail
-    bail!("No world name found in any WIT file. Cannot generate caller-utils without a world name.")
+    Ok(world_names)
 }
 
 // Convert WIT type to Rust type - IMPROVED with more Rust primitives
@@ -447,7 +426,7 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
         };
 
         return format!(
-            "/// Generated stub for `{}` {} RPC call\n/// HTTP endpoint - uncomment to implement\n// pub async fn {}({}) -> {} {{\n//     // TODO: Implement HTTP endpoint\n//     SendResult::Success({})\n// }}",
+            "// /// Generated stub for `{}` {} RPC call\n// /// HTTP endpoint - uncomment to implement\n// pub async fn {}({}) -> {} {{\n//     // TODO: Implement HTTP endpoint\n//     SendResult::Success({})\n// }}",
             signature.function_name,
             signature.attr_type,
             full_function_name,
@@ -478,7 +457,7 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
 
     // Generate function with implementation using send
     format!(
-        "/// Generated stub for `{}` {} RPC call\npub async fn {}({}) -> {} {{\n    let request = {};\n    send::<{}>(&request, target, 30).await\n}}",
+        "/// Generated stub for `{}` {} RPC call\npub async fn {}({}) -> {} {{\n    let body = {};\n    let body = serde_json::to_vec(&body).unwrap();\n    let request = Request::to(target)\n        .body(body);\n    send::<{}>(request).await\n}}",
         signature.function_name,
         signature.attr_type,
         full_function_name,
@@ -492,7 +471,7 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
 // Create the caller-utils crate with a single lib.rs file
 fn create_caller_utils_crate(api_dir: &Path, base_dir: &Path) -> Result<()> {
     // Path to the new crate
-    let caller_utils_dir = base_dir.join("caller-utils");
+    let caller_utils_dir = base_dir.join("crates").join("caller-utils");
     println!(
         "Creating caller-utils crate at {}",
         caller_utils_dir.display()
@@ -512,12 +491,11 @@ publish = false
 
 [dependencies]
 anyhow = "1.0"
-hyperware_process_lib = { version = "1.0.4", features = ["logging"] }
 process_macros = "0.1.0"
 futures-util = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-hyperware_app_common = { git = "https://github.com/hyperware-ai/hyperprocess-macro" }
+hyperware_app_common = { git = "https://github.com/hyperware-ai/hyperprocess-macro", rev = "4e417e1" }
 once_cell = "1.20.2"
 futures = "0.3"
 uuid = { version = "1.0" }
@@ -533,8 +511,22 @@ crate-type = ["cdylib", "lib"]
     println!("Created Cargo.toml for caller-utils");
 
     // Get the world name (preferably the types- version)
-    let world_name = find_world_name(api_dir)?;
-    println!("Using world name for code generation: {}", world_name);
+    let world_names = find_world_names(api_dir)?;
+    println!("Using world names for code generation: {:?}", world_names);
+    let world_name = if world_names.len() == 0 {
+        ""
+    } else if world_names.len() == 1 {
+        &world_names[0]
+    } else {
+        let path = api_dir.join("types.wit");
+        let mut content = "world types {\n".to_string();
+        for world_name in world_names {
+            content.push_str(&format!("    include {world_name};\n"));
+        }
+        content.push_str("}\n");
+        fs::write(&path, &content)?;
+        "types"
+    };
 
     // Get all interfaces from the world file
     let interface_imports = find_interfaces_in_world(api_dir)?;
@@ -632,7 +624,6 @@ crate-type = ["cdylib", "lib"]
     // Create single lib.rs with all modules inline
     let mut lib_rs = String::new();
 
-    // Updated wit_bindgen usage with explicit world name - FIXED: Removed unused imports
     lib_rs.push_str("wit_bindgen::generate!({\n");
     lib_rs.push_str("    path: \"target/wit\",\n");
     lib_rs.push_str(&format!("    world: \"{}\",\n", world_name));
@@ -645,7 +636,8 @@ crate-type = ["cdylib", "lib"]
     // Add global imports
     lib_rs.push_str("pub use hyperware_app_common::SendResult;\n");
     lib_rs.push_str("pub use hyperware_app_common::send;\n");
-    lib_rs.push_str("use hyperware_process_lib::Address;\n");
+    lib_rs.push_str("use hyperware_app_common::hyperware_process_lib as hyperware_process_lib;\n");
+    lib_rs.push_str("use hyperware_process_lib::{Address, Request};\n");
     lib_rs.push_str("use serde_json::json;\n\n");
 
     // Add interface use statements
@@ -752,11 +744,11 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
                 // Check if caller-utils is already in the members list
                 let caller_utils_exists = members_array
                     .iter()
-                    .any(|m| m.as_str().map_or(false, |s| s == "caller-utils"));
+                    .any(|m| m.as_str().map_or(false, |s| s == "crates/caller-utils"));
 
                 if !caller_utils_exists {
                     println!("Adding caller-utils to workspace members");
-                    members_array.push(Value::String("caller-utils".to_string()));
+                    members_array.push(Value::String("crates/caller-utils".to_string()));
 
                     // Write back the updated TOML
                     let updated_content = toml::to_string_pretty(&parsed_toml)
@@ -813,7 +805,7 @@ fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
                             let mut t = toml::map::Map::new();
                             t.insert(
                                 "path".to_string(),
-                                Value::String("../caller-utils".to_string()),
+                                Value::String("../crates/caller-utils".to_string()),
                             );
                             t
                         }),

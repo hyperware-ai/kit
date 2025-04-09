@@ -155,6 +155,29 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                         Err(eyre!("Failed to parse Option inner type!"))
                     }
                 }
+                "Result" => {
+                    if let syn::PathArguments::AngleBracketed(args) =
+                        &type_path.path.segments.last().unwrap().arguments
+                    {
+                        if args.args.len() >= 2 {
+                            if let (
+                                Some(syn::GenericArgument::Type(ok_ty)),
+                                Some(syn::GenericArgument::Type(err_ty)),
+                            ) = (args.args.first(), args.args.get(1))
+                            {
+                                let ok_type = rust_type_to_wit(ok_ty, used_types)?;
+                                let err_type = rust_type_to_wit(err_ty, used_types)?;
+                                Ok(format!("result<{}, {}>", ok_type, err_type))
+                            } else {
+                                Err(eyre!("Failed to parse Result generic arguments"))
+                            }
+                        } else {
+                            Err(eyre!("Result requires two type arguments"))
+                        }
+                    } else {
+                        Err(eyre!("Failed to parse Result type arguments"))
+                    }
+                }
                 // TODO: fix and enable
                 //"HashMap" | "BTreeMap" => {
                 //    if let syn::PathArguments::AngleBracketed(args) =
@@ -920,7 +943,7 @@ fn rewrite_wit(
                         println!("Extracted world name: {}", world_name);
 
                         // Check if this world name matches the one we're looking for
-                        if wit_worlds.remove(&world_name) {
+                        if wit_worlds.remove(&world_name) || wit_worlds.contains(&world_name[6..]) {
                             // Determine the include line based on world name
                             // If world name starts with "types-", use "include lib;" instead
                             if world_name.starts_with("types-") {
@@ -1040,6 +1063,20 @@ pub fn generate_wit_files(
         // Create a new file with the simple world definition
         let new_file_path = api_dir.join(format!("{}.wit", wit_world));
         let simple_world_content = format!("world {} {{}}", wit_world);
+
+        println!(
+            "Creating new world definition file: {}",
+            new_file_path.display()
+        );
+        fs::write(&new_file_path, simple_world_content).with_context(|| {
+            format!(
+                "Failed to create new world file: {}",
+                new_file_path.display()
+            )
+        })?;
+
+        let new_file_path = api_dir.join(format!("types-{}.wit", wit_world));
+        let simple_world_content = format!("world types-{} {{}}", wit_world);
 
         println!(
             "Creating new world definition file: {}",
