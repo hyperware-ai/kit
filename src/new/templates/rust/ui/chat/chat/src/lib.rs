@@ -33,7 +33,7 @@ struct NewMessage {
 type MessageArchive = HashMap<String, Vec<ChatMessage>>;
 
 fn make_http_address(our: &Address) -> Address {
-    Address::from((our.node(), "http_server", "distro", "sys"))
+    Address::from((our.node(), "http-server", "distro", "sys"))
 }
 
 fn handle_http_server_request(
@@ -44,7 +44,7 @@ fn handle_http_server_request(
 ) -> anyhow::Result<()> {
     let Ok(request) = serde_json::from_slice::<HttpServerRequest>(body) else {
         // Fail quietly if we can't parse the request
-        info!("couldn't parse message from http_server: {body:?}");
+        info!("couldn't parse message from http-server: {body:?}");
         return Ok(());
     };
 
@@ -214,7 +214,7 @@ fn handle_message(
 
 call_init!(init);
 fn init(our: Address) {
-    init_logging(&our, Level::DEBUG, Level::INFO, None, None).unwrap();
+    init_logging(Level::DEBUG, Level::INFO, None, None, None).unwrap();
     info!("begin");
 
     let mut message_archive = HashMap::new();
@@ -223,7 +223,7 @@ fn init(our: Address) {
 
     // Bind UI files to routes with index.html at "/"; API to /messages; WS to "/"
     server
-        .serve_ui(&our, "ui", vec!["/"], HttpBindingConfig::default())
+        .serve_ui("ui", vec!["/"], HttpBindingConfig::default())
         .expect("failed to serve UI");
     server
         .bind_http_path(HTTP_API_PATH, HttpBindingConfig::default())
