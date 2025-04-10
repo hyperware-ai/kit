@@ -355,6 +355,7 @@ async fn build_packages(
 
     let url = format!("http://localhost:{port}");
 
+    // TODO: add hyperapp setting to tests.toml
     for dependency_package_path in &test.dependency_package_paths {
         let path = match expand_home_path(&dependency_package_path) {
             Some(p) => p,
@@ -377,6 +378,7 @@ async fn build_packages(
             dependency_package_paths.clone(),
             vec![], // TODO
             false,
+            test.hyperapp.unwrap_or_default(),
             false,
             false,
             false,
@@ -402,6 +404,7 @@ async fn build_packages(
             dependency_package_paths.clone(),
             vec![], // TODO
             false,
+            test.hyperapp.unwrap_or_default(),
             false,
             false,
             false,
@@ -424,6 +427,7 @@ async fn build_packages(
             dependency_package_paths.clone(),
             vec![], // TODO
             false,
+            test.hyperapp.unwrap_or_default(),
             false,
             false,
             false,

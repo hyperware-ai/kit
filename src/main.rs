@@ -235,6 +235,7 @@ async fn execute(
                 .map(|s| PathBuf::from(s))
                 .collect();
             let rewrite = matches.get_one::<bool>("REWRITE").unwrap();
+            let hyperapp = matches.get_one::<bool>("HYPERAPP").unwrap();
             let reproducible = matches.get_one::<bool>("REPRODUCIBLE").unwrap();
             let force = matches.get_one::<bool>("FORCE").unwrap();
             let verbose = matches.get_one::<bool>("VERBOSE").unwrap();
@@ -253,6 +254,7 @@ async fn execute(
                 local_dependencies,
                 add_paths_to_api,
                 *rewrite,
+                *hyperapp,
                 *reproducible,
                 *force,
                 *verbose,
@@ -298,6 +300,7 @@ async fn execute(
                 .map(|s| PathBuf::from(s))
                 .collect();
             let rewrite = matches.get_one::<bool>("REWRITE").unwrap();
+            let hyperapp = matches.get_one::<bool>("HYPERAPP").unwrap();
             let reproducible = matches.get_one::<bool>("REPRODUCIBLE").unwrap();
             let force = matches.get_one::<bool>("FORCE").unwrap();
             let verbose = matches.get_one::<bool>("VERBOSE").unwrap();
@@ -316,6 +319,7 @@ async fn execute(
                 local_dependencies,
                 add_paths_to_api,
                 *rewrite,
+                *hyperapp,
                 *reproducible,
                 *force,
                 *verbose,
@@ -758,6 +762,12 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .help("Rewrite the package (disables `Spawn!()`) [default: don't rewrite]")
                 .required(false)
             )
+            .arg(Arg::new("HYPERAPP")
+                .action(ArgAction::SetTrue)
+                .long("hyperapp")
+                .help("Build using the Hyperapp framework [default: don't use Hyperapp framework]")
+                .required(false)
+            )
             .arg(Arg::new("REPRODUCIBLE")
                 .action(ArgAction::SetTrue)
                 .short('r')
@@ -863,6 +873,12 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .action(ArgAction::SetTrue)
                 .long("no-rewrite")
                 .help("Rewrite the package (disables `Spawn!()`) [default: don't rewrite]")
+                .required(false)
+            )
+            .arg(Arg::new("HYPERAPP")
+                .action(ArgAction::SetTrue)
+                .long("hyperapp")
+                .help("Build using the Hyperapp framework [default: don't use Hyperapp framework]")
                 .required(false)
             )
             .arg(Arg::new("REPRODUCIBLE")
