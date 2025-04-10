@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = [
+    "llm-template", "shared-types",
+]
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
