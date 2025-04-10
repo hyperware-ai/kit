@@ -378,7 +378,7 @@ async fn build_packages(
             dependency_package_paths.clone(),
             vec![], // TODO
             false,
-            false,
+            test.hyperapp.unwrap_or_default(),
             false,
             false,
             false,
@@ -404,7 +404,7 @@ async fn build_packages(
             dependency_package_paths.clone(),
             vec![], // TODO
             false,
-            false,
+            test.hyperapp.unwrap_or_default(),
             false,
             false,
             false,
@@ -427,7 +427,7 @@ async fn build_packages(
             dependency_package_paths.clone(),
             vec![], // TODO
             false,
-            false,
+            test.hyperapp.unwrap_or_default(),
             false,
             false,
             false,

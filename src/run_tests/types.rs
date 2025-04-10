@@ -32,6 +32,7 @@ pub struct Test {
     pub timeout_secs: u64,
     pub fakechain_router: u16,
     pub nodes: Vec<Node>,
+    pub hyperapp: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
