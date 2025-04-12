@@ -182,7 +182,9 @@ pub fn get_process_name(cargo_toml_path: &Path) -> Result<String> {
         let process_name = process_name.replace("_", "-");
         Ok(process_name.to_string())
     } else {
-        Err(eyre!("No package.name field in Cargo.toml at {cargo_toml_path:?}"))
+        Err(eyre!(
+            "No package.name field in Cargo.toml at {cargo_toml_path:?}"
+        ))
     }
 }
 
@@ -919,7 +921,9 @@ async fn compile_rust_wasm_process(
     verbose: bool,
 ) -> Result<()> {
     let Some(package_dir) = process_dir.parent() else {
-        return Err(eyre!("Could not derive package dir from process_dir ({process_dir:?}) parent"));
+        return Err(eyre!(
+            "Could not derive package dir from process_dir ({process_dir:?}) parent"
+        ));
     };
     let process_name = get_process_name(&process_dir.join("Cargo.toml"))?;
     info!("Compiling Rust Hyperware process in {:?}...", process_dir);
