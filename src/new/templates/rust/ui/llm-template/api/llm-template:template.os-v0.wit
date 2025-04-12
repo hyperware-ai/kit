@@ -1,0 +1,110 @@
+interface llm-template {
+
+    // API request variants
+    variant api-request {
+        get-status,
+        get-history,
+        clear-history,
+        message(custom-message),
+    }
+
+    // Custom message request
+    record custom-message {
+        message-type: string,
+        content: string,
+    }
+
+    // API response variants
+    variant api-response {
+        status(state-overview),
+        history(list<message-log>),
+        clear-history(success-response),
+        message(success-response),
+        api-error(error-response)
+    }
+
+    // Status report of the system
+    record state-overview {
+        connected-clients: u64,
+        message-count: u64,
+        message-counts-by-channel: list<tuple<string, u64>>,
+    }
+
+    
+    record success-response {
+        message: string,
+    }
+    
+    record error-response {
+        code: u16,
+        message: string,
+    }
+
+    record send-request {
+        target: string,
+        message: string,
+    }
+
+    record sample-test-app-message {
+        author: string,
+        content: string,
+    }
+
+
+    // Message log structure
+    record message-log {
+        source: string,
+        channel: message-channel,
+        message-type: message-type,
+        content: option<string>,
+        timestamp: u64,
+    }
+
+    // Message channel types
+    enum message-channel {
+        websocket,
+        http-api,
+        internal,
+        external,
+        timer,
+        terminal,
+    }
+
+    // Message type variants
+    variant message-type {
+        websocket-open,
+        websocket-close,
+        websocket-push-a,
+        websocket-push-b,
+        http-get,
+        http-post,
+        timer-tick,
+        local-request,
+        remote-request,
+        response-received,
+        terminal-command,
+        other(string),
+    }
+
+    // Hyper API request variants
+    variant hyper-api-request {
+        get-status,
+        get-history,
+        clear-history,
+        message(custom-message),
+    }
+
+    // Hyper API response variants
+    variant hyper-api-response {
+        status(state-overview),
+        history(list<message-log>),
+        clear-history(success-response),
+        message(success-response),
+        api-error(error-response)
+    }
+}
+
+world llm-template-dot-os-v0 {
+    import llm-template;
+    include process-v1;
+}
