@@ -1,15 +1,17 @@
-use std::collections::HashMap;
 use hyperware_process_lib::{
     get_blob, Address, 
     http::server::{
-        send_response, HttpServer, HttpServerRequest, StatusCode, send_ws_push, WsMessageType, IncomingHttpRequest
+        send_response, HttpServer, HttpServerRequest, StatusCode, send_ws_push, WsMessageType
     },
     http::Method,
     logging::info,
     LazyLoadBlob, last_blob,
 };
 use anyhow::anyhow;
-use shared_types::{MessageChannel, MessageType, ApiRequest, ApiResponse, AppState};
+use crate::hyperware::process::llm_template::{
+    ApiRequest, ApiResponse, StateOverview, SuccessResponse, ErrorResponse, MessageChannel, MessageType
+};
+use crate::types::AppState;
 use crate::log_message;
 
 pub fn handle_http_server_request(
@@ -30,14 +32,14 @@ pub fn handle_http_server_request(
             channel_id,
         } => {            
             // Track the new websocket connection
-            state.connected_clients.insert(channel_id, path.clone());
+            state.add_client(channel_id, path.clone());
             
             // Log the connection
             log_message(
                 state,
                 format!("WebSocket:{}", channel_id),
-                MessageChannel::WebSocket,
-                MessageType::WebSocketOpen,
+                MessageChannel::Websocket,
+                MessageType::WebsocketOpen,
                 Some(format!("Path: {}", path)),
             );
             
@@ -49,13 +51,13 @@ pub fn handle_http_server_request(
             log_message(
                 state,
                 format!("WebSocket:{}", channel_id),
-                MessageChannel::WebSocket,
-                MessageType::WebSocketClose,
+                MessageChannel::Websocket,
+                MessageType::WebsocketClose,
                 Some(format!("Channel ID: {}", channel_id)),
             );
             
             // Remove the closed connection
-            state.connected_clients.remove(&channel_id);
+            state.remove_client(channel_id);
             server.handle_websocket_close(channel_id);
             Ok(())
         },
@@ -78,16 +80,17 @@ pub fn handle_http_server_request(
                     // Handle GET requests based on path
                     match path.as_str() {
                         "/api/status" => {
-                            let counts: HashMap<String, usize> = state.message_counts
+                            // Convert message counts to WIT format
+                            let counts_by_channel: Vec<(String, u64)> = state.message_counts
                                 .iter()
-                                .map(|(k, v)| (format!("{:?}", k), *v))
+                                .map(|(k, v)| (format!("{:?}", k), *v as u64))
                                 .collect();
 
-                            let response = ApiResponse::Status { 
-                                connected_clients: state.connected_clients.len(),
-                                message_count: state.message_history.len(),
-                                message_counts_by_channel: counts
-                            };
+                            let response = ApiResponse::Status(StateOverview {
+                                connected_clients: state.connected_clients.len() as u64,
+                                message_count: state.message_history.len() as u64,
+                                message_counts_by_channel: counts_by_channel,
+                            });
                             
                             log_message(
                                 state,
@@ -100,9 +103,9 @@ pub fn handle_http_server_request(
                             send_response(StatusCode::OK, None, serde_json::to_vec(&response)?);
                         },
                         "/api/history" => {
-                            let response = ApiResponse::History { 
-                                messages: state.message_history.clone() 
-                            };
+                            // Use MessageLog type directly since it's WIT-compatible
+                            let data = state.message_history.clone();
+                            let response = ApiResponse::History(data);
                             
                             log_message(
                                 state,
@@ -122,19 +125,19 @@ pub fn handle_http_server_request(
                 Method::POST => {
                     // For POST requests, we need to parse the body
                     let Some(blob) = last_blob() else {
-                        let error_response = ApiResponse::Error {
+                        let error_response = ApiResponse::ApiError(ErrorResponse {
                             code: 400,
                             message: "No request body".to_string(),
-                        };
+                        });
                         send_response(StatusCode::BAD_REQUEST, None, serde_json::to_vec(&error_response)?);
                         return Ok(());
                     };
                     
                     let Ok(request_str) = std::str::from_utf8(&blob.bytes()) else {
-                        let error_response = ApiResponse::Error {
+                        let error_response = ApiResponse::ApiError(ErrorResponse {
                             code: 400,
                             message: "Invalid UTF-8 in request body".to_string(),
-                        };
+                        });
                         send_response(StatusCode::BAD_REQUEST, None, serde_json::to_vec(&error_response)?);
                         return Ok(());
                     };
@@ -148,7 +151,7 @@ pub fn handle_http_server_request(
                                 ApiRequest::ClearHistory => {
                                     // Clear the history
                                     state.message_history.clear();
-                                    state.message_counts.clear();
+                                    state.clear_counts();
                                     
                                     log_message(
                                         state,
@@ -158,57 +161,55 @@ pub fn handle_http_server_request(
                                         Some("History cleared".to_string()),
                                     );
                                     
-                                    let response = ApiResponse::Success { 
-                                        message: "History cleared successfully".to_string() 
-                                    };
+                                    let response = ApiResponse::ClearHistory(SuccessResponse {
+                                        message: "History cleared successfully".to_string(),
+                                    });
                                     
                                     send_response(StatusCode::OK, None, serde_json::to_vec(&response)?);
                                 },
-                                ApiRequest::CustomMessage { message_type, content } => {
+                                ApiRequest::Message(msg) => {
                                     // Log a custom message
                                     log_message(
                                         state,
                                         "HTTP:Custom".to_string(),
                                         MessageChannel::HttpApi,
-                                        MessageType::Other(message_type.clone()),
-                                        Some(content.clone()),
+                                        MessageType::Other(msg.message_type.clone()),
+                                        Some(msg.content.clone()),
                                     );
                                     
-                                    let response = ApiResponse::Success {   
-                                        message: "Custom message logged successfully".to_string() 
-                                    };
+                                    let response = ApiResponse::Message(SuccessResponse {
+                                        message: "Custom message logged successfully".to_string(),
+                                    });
                                     
                                     send_response(StatusCode::OK, None, serde_json::to_vec(&response)?);
                                 },
                                 _ => {
                                     // Invalid request - should use GET endpoints instead
-                                    let error_response = ApiResponse::Error {
+                                    let error_response = ApiResponse::ApiError(ErrorResponse {
                                         code: 400,
                                         message: "Invalid request type. Use GET endpoints for status and history.".to_string(),
-                                    };
+                                    });
                                     send_response(StatusCode::BAD_REQUEST, None, serde_json::to_vec(&error_response)?);
                                 }
                             }
                         },
                         Err(err) => {
-                            let error_response = ApiResponse::Error {
+                            let error_response = ApiResponse::ApiError(ErrorResponse {
                                 code: 400,
                                 message: format!("Invalid request format: {}", err),
-                            };
+                            });
                             send_response(StatusCode::BAD_REQUEST, None, serde_json::to_vec(&error_response)?);
                         }
                     }
                 },
                 _ => {
-                    // Method not allowed
-                    let error_response = ApiResponse::Error {
+                    let error_response = ApiResponse::ApiError(ErrorResponse {
                         code: 405,
-                        message: format!("Method not allowed: {}", method),
-                    };
+                        message: "Method not allowed".to_string(),
+                    });
                     send_response(StatusCode::METHOD_NOT_ALLOWED, None, serde_json::to_vec(&error_response)?);
                 }
             }
-            
             Ok(())
         }
     }
@@ -233,72 +234,68 @@ fn handle_websocket_push(state: &mut AppState, channel_id: u32) -> anyhow::Resul
                 ApiRequest::ClearHistory => {
                     // Clear the history
                     state.message_history.clear();
-                    state.message_counts.clear();
+                    state.clear_counts();
                     
                     // Log the action
                     log_message(
                         state,
                         "WebSocket:Clear".to_string(),
-                        MessageChannel::WebSocket,
-                        MessageType::WebSocketPushA,
+                        MessageChannel::Websocket,
+                        MessageType::WebsocketPushA,
                         Some("History cleared".to_string()),
                     );
                     
                     // Create a success response
-                    let response = ApiResponse::Success { 
-                        message: "History cleared successfully".to_string() 
-                    };
+                    let response = ApiResponse::ClearHistory(SuccessResponse {
+                        message: "History cleared successfully".to_string(),
+                    });
                     
-                    // Convert to JSON
+                    // Convert to JSON and send only to the requesting client
                     if let Ok(response_json) = serde_json::to_string(&response) {
-                        // Send to all connected clients
-                        for &client_id in state.connected_clients.keys() {
-                            send_ws_push(
-                                client_id,
-                                WsMessageType::Text,
-                                LazyLoadBlob {
-                                    mime: Some("application/json".to_string()),
-                                    bytes: response_json.as_bytes().to_vec(),
-                                },
-                            );
-                        }
+                        info!("Sending WS response to client {}: {}", channel_id, response_json);
                         
-                        info!("Sent clear history notification to all clients");
+                        send_ws_push(
+                            channel_id,
+                            WsMessageType::Text,
+                            LazyLoadBlob {
+                                mime: Some("application/json".to_string()),
+                                bytes: response_json.as_bytes().to_vec(),
+                            },
+                        );
                     }
                 },
                 _ => {
                     // Handle all other request types
                     let response = match api_request {
                         ApiRequest::GetStatus => {
-                            let counts: HashMap<String, usize> = state.message_counts
+                            // Convert message counts to WIT format
+                            let counts_by_channel: Vec<(String, u64)> = state.message_counts
                                 .iter()
-                                .map(|(k, v)| (format!("{:?}", k), *v))
+                                .map(|(k, v)| (format!("{:?}", k), *v as u64))
                                 .collect();
 
-                            ApiResponse::Status { 
-                                connected_clients: state.connected_clients.len(),
-                                message_count: state.message_history.len(),
-                                message_counts_by_channel: counts
-                            }
+                            ApiResponse::Status(StateOverview {
+                                connected_clients: state.connected_clients.len() as u64,
+                                message_count: state.message_history.len() as u64,
+                                message_counts_by_channel: counts_by_channel,
+                            })
                         },
                         ApiRequest::GetHistory => {
-                            ApiResponse::History { 
-                                messages: state.message_history.clone() 
-                            }
+                            ApiResponse::History(state.message_history.clone())
                         },
-                        ApiRequest::CustomMessage { message_type, content } => {
+                        ApiRequest::Message(msg) => {
                             // Log a custom message type
                             log_message(
                                 state,
                                 "WebSocket:Custom".to_string(),
-                                MessageChannel::WebSocket,
-                                MessageType::WebSocketPushB,
-                                Some(format!("Type: {}, Content: {}", message_type, content)),
+                                MessageChannel::Websocket,
+                                MessageType::WebsocketPushB,
+                                Some(format!("Type: {}, Content: {}", msg.message_type, msg.content)),
                             );
                             
-                            ApiResponse::Success { 
-                                message: "Custom message logged successfully".to_string() 
-                            }
+                            ApiResponse::Message(SuccessResponse {
+                                message: "Custom message logged successfully".to_string(),
+                            })
                         },
                         // We already handled ClearHistory above
                         ApiRequest::ClearHistory => unreachable!(),

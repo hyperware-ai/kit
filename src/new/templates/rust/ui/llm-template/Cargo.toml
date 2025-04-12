@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "llm-template", "shared-types",
+    "llm-template",
 ]
 
 [profile.release]

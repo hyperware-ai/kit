@@ -1,66 +1,4 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-
-/// Message source/channel type
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum MessageChannel {
-    /// WebSocket messages
-    WebSocket,
-    /// HTTP API requests
-    HttpApi,
-    /// Internal process messages
-    Internal,
-    /// External node messages
-    External,
-    /// Timer events
-    Timer,
-    /// Terminal commands
-    Terminal,
-}
-
-/// Message type for categorization
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum MessageType {
-    /// WebSocket connection opened
-    WebSocketOpen,
-    /// WebSocket connection closed
-    WebSocketClose,
-    /// WebSocket message received
-    WebSocketPushA,
-    /// Another type of WebSocket message
-    WebSocketPushB,
-    /// HTTP GET request
-    HttpGet,
-    /// HTTP POST request
-    HttpPost,
-    /// Timer tick event
-    TimerTick,
-    /// Local process request
-    LocalRequest,
-    /// Remote node request
-    RemoteRequest,
-    /// Response to our request
-    ResponseReceived,
-    /// Terminal command
-    TerminalCommand,
-    /// Other message type
-    Other(String),
-}
-
-/// Log entry for tracking messages
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MessageLog {
-    /// Source of the message
-    pub source: String,
-    /// Channel the message came through
-    pub channel: MessageChannel,
-    /// Type of the message
-    pub message_type: MessageType,
-    /// Message content (if available)
-    pub content: Option<String>,
-    /// Timestamp when the message was received
-    pub timestamp: u64,
-}
+use crate::hyperware::process::llm_template::{MessageLog, MessageChannel, MessageType};
 
 /// Represents the application state
 #[derive(Debug, Clone, Default)]
@@ -68,11 +6,11 @@ pub struct AppState {
     /// Tracks message history for all channels
     pub message_history: Vec<MessageLog>,
     /// Message counts by channel
-    pub message_counts: HashMap<MessageChannel, usize>,
+    pub message_counts: Vec<(MessageChannel, usize)>,
     /// Configuration settings
     pub config: AppConfig,
     /// Connected WebSocket clients (channel_id -> path)
-    pub connected_clients: HashMap<u32, String>,
+    pub connected_clients: Vec<(u32, String)>,
 }
 
 /// Configuration for the application
@@ -93,43 +31,36 @@ impl Default for AppConfig {
     }
 }
 
-/// HTTP API request types with a more RESTful approach
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ApiRequest {
-    /// Get system status
-    GetStatus,
-    /// Get message history
-    GetHistory,
-    /// Clear history
-    ClearHistory,
-    /// Custom message for testing
-    CustomMessage { message_type: String, content: String },
-}
+impl AppState {
+    /// Increment count for a channel
+    pub fn increment_channel_count(&mut self, channel: MessageChannel) {
+        if let Some(count) = self.message_counts.iter_mut().find(|(ch, _)| *ch == channel) {
+            count.1 += 1;
+        } else {
+            self.message_counts.push((channel, 1));
+        }
+    }
 
-/// HTTP API response types
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ApiResponse {
-    /// Response with message history
-    History { 
-        messages: Vec<MessageLog> 
-    },
-    /// Response with message counts
-    MessageCounts { 
-        counts: HashMap<String, usize> 
-    },
-    /// Status response
-    Status { 
-        connected_clients: usize,
-        message_count: usize,
-        message_counts_by_channel: HashMap<String, usize>
-    },
-    /// Success response
-    Success { 
-        message: String 
-    },
-    /// Error response
-    Error { 
-        code: u16, 
-        message: String 
-    },
+    /// Add a client connection
+    pub fn add_client(&mut self, channel_id: u32, path: String) {
+        self.connected_clients.push((channel_id, path));
+    }
+
+    /// Remove a client connection
+    pub fn remove_client(&mut self, channel_id: u32) {
+        self.connected_clients.retain(|(id, _)| *id != channel_id);
+    }
+
+    /// Get client path
+    pub fn get_client_path(&self, channel_id: u32) -> Option<&str> {
+        self.connected_clients
+            .iter()
+            .find(|(id, _)| *id == channel_id)
+            .map(|(_, path)| path.as_str())
+    }
+
+    /// Clear message counts
+    pub fn clear_counts(&mut self) {
+        self.message_counts.clear();
+    }
 }

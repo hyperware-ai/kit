@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use hyperware_process_lib::{
     Address, Response,
     http::server::{HttpServer, WsMessageType, send_ws_push},
@@ -6,10 +5,12 @@ use hyperware_process_lib::{
     LazyLoadBlob,
 };
 use serde_json;
-use shared_types::{MessageChannel, MessageType, AppState};
+use crate::types::AppState;
 use crate::log_message;
 use super::make_terminal_address;
-
+use crate::hyperware::process::llm_template::{
+    MessageChannel, MessageType, ApiResponse, StateOverview, SuccessResponse
+};
 // Timer handler, usually used for time-based events
 pub fn handle_timer_message(
     _body: &[u8],
@@ -25,24 +26,25 @@ pub fn handle_timer_message(
         Some("Timer event received".to_string()),
     );
     info!("Received timer message");
+    
     // Example: Send status updates to all connected websocket clients
-    let counts: HashMap<String, usize> = state.message_counts
+    // Convert message counts to WIT format
+    let counts_by_channel: Vec<(String, u64)> = state.message_counts
         .iter()
-        .map(|(k, v)| (format!("{:?}", k), *v))
+        .map(|(k, v)| (format!("{:?}", k), *v as u64))
         .collect();
         
-    let status_update = serde_json::json!({
-        "type": "status_update",
-        "connected_clients": state.connected_clients.len(),
-        "message_count": state.message_history.len(),
-        "message_counts_by_channel": counts
+    let response = ApiResponse::Status(StateOverview {
+        connected_clients: state.connected_clients.len() as u64,
+        message_count: state.message_history.len() as u64,
+        message_counts_by_channel: counts_by_channel,
     });
     
-    if let Ok(status_json) = serde_json::to_string(&status_update) {
-        for channel_id in state.connected_clients.keys() {
+    if let Ok(status_json) = serde_json::to_string(&response) {
+        for (client_id, _) in &state.connected_clients {
             // Sending WS push to all connected clients
             send_ws_push(
-                *channel_id,
+                *client_id,
                 WsMessageType::Text,
                 LazyLoadBlob {
                     mime: Some("application/json".to_string()),
@@ -76,7 +78,14 @@ pub fn handle_terminal_message(
         content,
     );
     
-    // Process terminal commands if needed
+    // Return success response
+    let response = ApiResponse::Message(SuccessResponse {
+        message: "Terminal message logged successfully".to_string(),
+    });
+    
+    Response::new()
+        .body(serde_json::to_vec(&response)?)
+        .send()?;
     
     Ok(())
 }
@@ -107,11 +116,9 @@ pub fn handle_internal_message(
         content,
     );
     
-    // Simple response for internal messages
-    let response = serde_json::json!({
-        "status": "ok",
-        "message": "Message logged",
-        "message_count": state.message_history.len()
+    // Return success response
+    let response = ApiResponse::Message(SuccessResponse {
+        message: "Message logged successfully".to_string(),
     });
 
     Response::new()
@@ -127,33 +134,67 @@ pub fn handle_external_message(
     state: &mut AppState,
     _server: &mut HttpServer,
 ) -> anyhow::Result<()> {
-    // Log the external message
-    let content = if let Ok(str) = std::str::from_utf8(body) {
-        Some(str.to_string())
-    } else {
-        Some(format!("Binary data: {} bytes", body.len()))
+    // Try to parse the incoming message as a hyper-api-request
+    let hyper_request: Result<HyperApiRequest, _> = serde_json::from_slice(body);
+    
+    let response = match hyper_request {
+        Ok(request) => {
+            match request {
+                HyperApiRequest::GetStatus => {
+                    HyperApiResponse::Status(StateOverview {
+                        connected_clients: state.connected_clients,
+                        message_count: state.message_count,
+                        message_counts_by_channel: state.message_counts_by_channel.clone(),
+                    })
+                },
+                HyperApiRequest::GetHistory => {
+                    HyperApiResponse::History(state.message_history.clone())
+                },
+                HyperApiRequest::ClearHistory => {
+                    state.message_history.clear();
+                    HyperApiResponse::ClearHistory(SuccessResponse {
+                        message: "History cleared successfully".to_string(),
+                    })
+                },
+                HyperApiRequest::Message(msg) => {
+                    log_message(
+                        state,
+                        format!("External:{}", source),
+                        MessageChannel::External,
+                        MessageType::Other(msg.message_type.clone()),
+                        Some(msg.content.clone()),
+                    );
+                    HyperApiResponse::Message(SuccessResponse {
+                        message: "Message processed successfully".to_string(),
+                    })
+                }
+            }
+        },
+        Err(_) => {
+            // Fall back to the original behavior for non-hyper messages
+            let content = if let Ok(str) = std::str::from_utf8(body) {
+                Some(str.to_string())
+            } else {
+                Some(format!("Binary data: {} bytes", body.len()))
+            };
+            
+            log_message(
+                state,
+                format!("External:{}", source),
+                MessageChannel::External,
+                MessageType::ResponseReceived,
+                content,
+            );
+            HyperApiResponse::ApiError(ErrorResponse {
+                code: 400,
+                message: "Invalid request format".to_string(),
+            })
+        }
     };
-    
-    log_message(
-        state,
-        format!("External:{}", source),
-        MessageChannel::External,
-        MessageType::ResponseReceived,
-        content,
-    );
-    
-    
-    // Simple response for external messages
-    let response = serde_json::json!({
-            "status": "ok",
-            "message": "Message logged",
-            "message_count": state.message_history.len()
-    });
-       
+
     Response::new()
         .body(serde_json::to_vec(&response)?)
         .send()?;
-    
     
     Ok(())
 }

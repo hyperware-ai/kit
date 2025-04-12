@@ -6,13 +6,15 @@ use hyperware_process_lib::{await_message, call_init, print_to_terminal, println
     vfs::{create_drive, create_file, File},
     our,
 };
-use shared_types::{MessageChannel, MessageType, MessageLog, ApiRequest, ApiResponse};
 mod utils;
 mod client_ops;
 mod tester_lib;
 
 use utils::*;
 use client_ops::*;
+
+// Add type alias to disambiguate Error
+type ConversionError = core::convert::Infallible;
 
 wit_bindgen::generate!({
     path: "target/wit",

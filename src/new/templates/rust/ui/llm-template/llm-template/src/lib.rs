@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hyperware_process_lib::logging::{error, info, init_logging, Level};
@@ -11,14 +10,16 @@ use hyperware_process_lib::{
     },
     Address, Message
 };
-use shared_types::{MessageChannel, MessageType, MessageLog, ApiRequest, ApiResponse, AppConfig, AppState};
 
+mod types;
+use types::{AppConfig, AppState};
+use crate::hyperware::process::llm_template::{MessageChannel, MessageType, MessageLog};
 mod message_handlers;
 use message_handlers::*;
 
 wit_bindgen::generate!({
     path: "target/wit",
-    world: "llm-template-template-dot-os-v0",
+    world: "llm-template-dot-os-v0",
     generate_unused_types: true,
     additional_derives: [serde::Deserialize, serde::Serialize, process_macros::SerdeJsonInto],
 });
@@ -77,14 +78,13 @@ fn log_message(
     });
     
     // Update message count for this channel
-    *state.message_counts.entry(channel).or_insert(0) += 1;
+    state.increment_channel_count(channel);
     
     // Trim history if needed
     if state.message_history.len() > state.config.max_history {
         state.message_history.remove(0);
     }
 }
-
 
 fn handle_message(
     message: &Message,
@@ -143,13 +143,10 @@ fn init(our: Address) {
     info!("begin");
 
     // Initialize application state
-    let mut state = AppState {
-        config: AppConfig {
-            max_history: 100,
-            log_content: true,
-        },
-        message_counts: HashMap::new(),
-        ..Default::default()
+    let mut state = AppState::default();
+    state.config = AppConfig {
+        max_history: 100,
+        log_content: true,
     };
 
     let mut server = HttpServer::new(5);
@@ -160,7 +157,6 @@ fn init(our: Address) {
     server
         .serve_ui("ui", vec!["/"], http_config.clone())
         .expect("failed to serve UI");
-
 
     server
         .bind_ws_path(WS_PATH, WsBindingConfig::default())
