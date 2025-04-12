@@ -169,6 +169,23 @@ pub fn remove_missing_features(cargo_toml_path: &Path, features: Vec<&str>) -> R
         .collect())
 }
 
+#[instrument(level = "trace", skip_all)]
+pub fn get_process_name(cargo_toml_path: &Path) -> Result<String> {
+    let cargo_toml_content = fs::read_to_string(cargo_toml_path)?;
+    let cargo_toml: toml::Value = cargo_toml_content.parse()?;
+
+    if let Some(process_name) = cargo_toml
+        .get("package")
+        .and_then(|p| p.get("name"))
+        .and_then(|n| n.as_str())
+    {
+        let process_name = process_name.replace("_", "-");
+        Ok(process_name.to_string())
+    } else {
+        Err(eyre!("No package.name field in Cargo.toml at {cargo_toml_path:?}"))
+    }
+}
+
 /// Check if the first element is empty and there are no more elements
 #[instrument(level = "trace", skip_all)]
 fn is_only_empty_string(splitted: &Vec<&str>) -> bool {
@@ -901,18 +918,22 @@ async fn compile_rust_wasm_process(
     features: &str,
     verbose: bool,
 ) -> Result<()> {
+    let Some(package_dir) = process_dir.parent() else {
+        return Err(eyre!("Could not derive package dir from process_dir ({process_dir:?}) parent"));
+    };
+    let process_name = get_process_name(&process_dir.join("Cargo.toml"))?;
     info!("Compiling Rust Hyperware process in {:?}...", process_dir);
 
     // Paths
-    let wit_dir = process_dir.join("target").join("wit");
-    let bindings_dir = process_dir
+    let wit_dir = package_dir.join("target").join("wit");
+    let bindings_dir = package_dir
         .join("target")
         .join("bindings")
-        .join(process_dir.file_name().unwrap());
+        .join(package_dir.file_name().unwrap());
     fs::create_dir_all(&bindings_dir)?;
 
     // Check and download wasi_snapshot_preview1.wasm if it does not exist
-    let wasi_snapshot_file = process_dir
+    let wasi_snapshot_file = package_dir
         .join("target")
         .join("wasi_snapshot_preview1.wasm");
     let wasi_snapshot_url = format!(
@@ -935,6 +956,8 @@ async fn compile_rust_wasm_process(
     let mut args = vec![
         "+stable",
         "build",
+        "-p",
+        &process_name,
         "--release",
         "--no-default-features",
         "--target",
@@ -950,7 +973,7 @@ async fn compile_rust_wasm_process(
     } else {
         features.len()
     };
-    let features = remove_missing_features(&process_dir.join("Cargo.toml"), features)?;
+    let features = remove_missing_features(&package_dir.join("Cargo.toml"), features)?;
     if !test_only && original_length != features.len() {
         info!(
             "process {:?} missing features; using {:?}",
@@ -963,7 +986,7 @@ async fn compile_rust_wasm_process(
         args.push(&features);
     }
     let result = run_command(
-        Command::new("cargo").args(&args).current_dir(process_dir),
+        Command::new("cargo").args(&args).current_dir(package_dir),
         verbose,
     )?;
 
@@ -981,9 +1004,9 @@ async fn compile_rust_wasm_process(
     // For use inside of process_dir
     // Run `wasm-tools component new`, putting output in pkg/
     //  and rewriting all `_`s to `-`s
-    // cargo hates `-`s and so outputs with `_`s; Kimap hates
+    // cargo hates `-`s and so outputs with `_`s; Hypermap hates
     //  `_`s and so we convert to and enforce all `-`s
-    let wasm_file_name_cab = process_dir
+    let wasm_file_name_cab = package_dir
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap()
@@ -993,7 +1016,7 @@ async fn compile_rust_wasm_process(
     let wasm_file_prefix = Path::new("target/wasm32-wasip1/release");
     let wasm_file_cab = wasm_file_prefix.join(&format!("{wasm_file_name_cab}.wasm"));
 
-    let wasm_file_pkg = format!("../pkg/{wasm_file_name_hep}.wasm");
+    let wasm_file_pkg = format!("pkg/{wasm_file_name_hep}.wasm");
     let wasm_file_pkg = Path::new(&wasm_file_pkg);
 
     let wasi_snapshot_file = Path::new("target/wasi_snapshot_preview1.wasm");
@@ -1009,7 +1032,7 @@ async fn compile_rust_wasm_process(
                 "--adapt",
                 wasi_snapshot_file.to_str().unwrap(),
             ])
-            .current_dir(process_dir),
+            .current_dir(package_dir),
         verbose,
     )?;
 
@@ -1070,11 +1093,11 @@ async fn compile_and_copy_ui(
 
 #[instrument(level = "trace", skip_all)]
 async fn build_wit_dir(
-    process_dir: &Path,
+    package_dir: &Path,
     apis: &HashMap<String, Vec<u8>>,
     wit_version: Option<u32>,
 ) -> Result<()> {
-    let wit_dir = process_dir.join("target").join("wit");
+    let wit_dir = package_dir.join("target").join("wit");
     if wit_dir.exists() {
         fs::remove_dir_all(&wit_dir)?;
     }
@@ -1569,6 +1592,8 @@ async fn compile_package(
         })
         .to_string();
 
+    build_wit_dir(&package_dir, &apis, metadata.properties.wit_version).await?;
+
     let mut tasks = tokio::task::JoinSet::new();
     let features = features.to_string();
     let mut to_compile = HashSet::new();
@@ -1588,11 +1613,8 @@ async fn compile_package(
         let is_py_process = path.join(PYTHON_SRC_PATH).exists();
         let is_js_process = path.join(JAVASCRIPT_SRC_PATH).exists();
         if is_rust_process || is_py_process || is_js_process {
-            build_wit_dir(&path, &apis, metadata.properties.wit_version).await?;
-        } else {
-            continue;
+            to_compile.insert((path, is_rust_process, is_py_process, is_js_process));
         }
-        to_compile.insert((path, is_rust_process, is_py_process, is_js_process));
     }
 
     // TODO: move process/target/wit -> target/wit
