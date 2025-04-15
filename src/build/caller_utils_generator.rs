@@ -35,6 +35,7 @@ pub fn to_pascal_case(s: &str) -> String {
 
 // Find the world name in the world WIT file, prioritizing types-prefixed worlds
 fn find_world_names(api_dir: &Path) -> Result<Vec<String>> {
+    println!("Looking in {api_dir:?} for world names...");
     let mut world_names = Vec::new();
 
     // Look for world definition files
@@ -471,7 +472,7 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
 // Create the caller-utils crate with a single lib.rs file
 fn create_caller_utils_crate(api_dir: &Path, base_dir: &Path) -> Result<()> {
     // Path to the new crate
-    let caller_utils_dir = base_dir.join("crates").join("caller-utils");
+    let caller_utils_dir = base_dir.join("target").join("caller-utils");
     println!(
         "Creating caller-utils crate at {}",
         caller_utils_dir.display()
@@ -495,7 +496,7 @@ process_macros = "0.1.0"
 futures-util = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-hyperware_app_common = { git = "https://github.com/hyperware-ai/hyperprocess-macro", rev = "f29952f" }
+hyperware_app_common = { git = "https://github.com/hyperware-ai/hyperprocess-macro", rev = "df8f395" }
 once_cell = "1.20.2"
 futures = "0.3"
 uuid = { version = "1.0" }
@@ -744,11 +745,11 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
                 // Check if caller-utils is already in the members list
                 let caller_utils_exists = members_array
                     .iter()
-                    .any(|m| m.as_str().map_or(false, |s| s == "crates/caller-utils"));
+                    .any(|m| m.as_str().map_or(false, |s| s == "target/caller-utils"));
 
                 if !caller_utils_exists {
                     println!("Adding caller-utils to workspace members");
-                    members_array.push(Value::String("crates/caller-utils".to_string()));
+                    members_array.push(Value::String("target/caller-utils".to_string()));
 
                     // Write back the updated TOML
                     let updated_content = toml::to_string_pretty(&parsed_toml)
@@ -773,7 +774,7 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
 }
 
 // Add caller-utils as a dependency to hyperware:process crates
-fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
+pub fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
     for project_path in projects {
         let cargo_toml_path = project_path.join("Cargo.toml");
         println!(
@@ -805,7 +806,7 @@ fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
                             let mut t = toml::map::Map::new();
                             t.insert(
                                 "path".to_string(),
-                                Value::String("../crates/caller-utils".to_string()),
+                                Value::String("../target/caller-utils".to_string()),
                             );
                             t
                         }),
@@ -839,15 +840,12 @@ fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
 }
 
 // Create caller-utils crate and integrate with the workspace
-pub fn create_caller_utils(base_dir: &Path, api_dir: &Path, projects: &[PathBuf]) -> Result<()> {
+pub fn create_caller_utils(base_dir: &Path, api_dir: &Path) -> Result<()> {
     // Step 1: Create the caller-utils crate
     create_caller_utils_crate(api_dir, base_dir)?;
 
     // Step 2: Update workspace Cargo.toml
     update_workspace_cargo_toml(base_dir)?;
-
-    // Step 3: Add caller-utils dependency to each hyperware:process project
-    add_caller_utils_to_projects(projects)?;
 
     Ok(())
 }
