@@ -4,10 +4,12 @@ use crate::hyperware::process::chat::{
     ChatMessage, Request as ChatRequest, Response as ChatResponse, SendRequest,
 };
 use hyperware_process_lib::logging::{error, info, init_logging, Level};
-use hyperware_process_lib::{await_message, call_init, println, Address, Message, Request, Response};
+use hyperware_process_lib::{
+    await_message, call_init, println, Address, Message, Request, Response,
+};
 
 wit_bindgen::generate!({
-    path: "target/wit",
+    path: "../target/wit",
     world: "chat-template-dot-os-v0",
     generate_unused_types: true,
     additional_derives: [serde::Deserialize, serde::Serialize, process_macros::SerdeJsonInto],
