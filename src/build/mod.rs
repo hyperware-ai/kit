@@ -1621,19 +1621,12 @@ async fn compile_package(
         }
     }
 
-    // TODO: move process/target/wit -> target/wit
-    if !ignore_deps && !dependencies.is_empty() {
-        info!("{hyperapp_processed_projects:?}");
-        if let Some(ref processed_projects) = hyperapp_processed_projects {
-            for processed_project in processed_projects {
-                let api_dir = processed_project.join("target").join("wit");
-                info!("{processed_project:?} {api_dir:?}");
-                caller_utils_generator::create_caller_utils(
-                    package_dir,
-                    &api_dir,
-                    &[processed_project.clone()],
-                )?;
-            }
+    let api_dir = package_dir.join("target").join("wit");
+    //info!("{processed_project:?} {api_dir:?}");
+    if let Some(ref processed_projects) = hyperapp_processed_projects {
+        caller_utils_generator::create_caller_utils(package_dir, &api_dir)?;
+        for processed_project in processed_projects {
+            caller_utils_generator::add_caller_utils_to_projects(&[processed_project.clone()])?;
         }
     }
 
