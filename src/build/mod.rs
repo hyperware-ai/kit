@@ -1815,7 +1815,7 @@ pub async fn execute(
     } else {
         let api_dir = live_dir.join("api");
         let (processed_projects, interfaces) =
-            wit_generator::generate_wit_files(&live_dir, &api_dir, false)?;
+            wit_generator::generate_wit_files(&live_dir, &api_dir)?;
         if interfaces.is_empty() {
             None
         } else {
