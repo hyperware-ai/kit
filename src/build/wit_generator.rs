@@ -178,31 +178,31 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                         Err(eyre!("Failed to parse Result type arguments"))
                     }
                 }
-                // TODO: fix and enable
-                //"HashMap" | "BTreeMap" => {
-                //    if let syn::PathArguments::AngleBracketed(args) =
-                //        &type_path.path.segments.last().unwrap().arguments
-                //    {
-                //        if args.args.len() >= 2 {
-                //            if let (
-                //                Some(syn::GenericArgument::Type(key_ty)),
-                //                Some(syn::GenericArgument::Type(val_ty)),
-                //            ) = (args.args.first(), args.args.get(1))
-                //            {
-                //                let key_type = rust_type_to_wit(key_ty, used_types)?;
-                //                let val_type = rust_type_to_wit(val_ty, used_types)?;
-                //                // For HashMaps, we'll generate a list of tuples where each tuple contains a key and value
-                //                Ok(format!("list<tuple<{}, {}>>", key_type, val_type))
-                //            } else {
-                //                Ok("list<tuple<string, any>>".to_string())
-                //            }
-                //        } else {
-                //            Ok("list<tuple<string, any>>".to_string())
-                //        }
-                //    } else {
-                //        Ok("list<tuple<string, any>>".to_string())
-                //    }
-                //}
+                // Handle HashMap and BTreeMap
+                "HashMap" | "BTreeMap" => {
+                    if let syn::PathArguments::AngleBracketed(args) =
+                        &type_path.path.segments.last().unwrap().arguments
+                    {
+                        if args.args.len() >= 2 {
+                            if let (
+                                Some(syn::GenericArgument::Type(key_ty)),
+                                Some(syn::GenericArgument::Type(val_ty)),
+                            ) = (args.args.first(), args.args.get(1))
+                            {
+                                let key_type = rust_type_to_wit(key_ty, used_types)?;
+                                let val_type = rust_type_to_wit(val_ty, used_types)?;
+                                // For HashMaps, we'll generate a list of tuples where each tuple contains a key and value
+                                Ok(format!("list<tuple<{}, {}>>", key_type, val_type))
+                            } else {
+                                Err(eyre!("Failed to parse HashMap/BTreeMap generic arguments"))
+                            }
+                        } else {
+                            Err(eyre!("HashMap/BTreeMap requires two type arguments"))
+                        }
+                    } else {
+                        Err(eyre!("Failed to parse HashMap/BTreeMap type arguments"))
+                    }
+                }
                 custom => {
                     // Validate custom type name
                     validate_name(custom, "Type")?;
