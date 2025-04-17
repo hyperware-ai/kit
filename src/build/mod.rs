@@ -1010,7 +1010,7 @@ async fn compile_rust_wasm_process(
     //  and rewriting all `_`s to `-`s
     // cargo hates `-`s and so outputs with `_`s; Hypermap hates
     //  `_`s and so we convert to and enforce all `-`s
-    let wasm_file_name_cab = package_dir
+    let wasm_file_name_cab = process_dir
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap()
