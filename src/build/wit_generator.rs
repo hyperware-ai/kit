@@ -304,7 +304,6 @@ fn collect_type_definitions_from_file(
 
                         println!("  Found used struct: {} -> {}", orig_name, name); // Updated message
 
-
                         // Proceed with field processing only if the struct is used
                         let fields: Vec<String> = match &item_struct.fields {
                             syn::Fields::Named(fields) => {
@@ -376,7 +375,7 @@ fn collect_type_definitions_from_file(
                                 format!("    record {} {{\n{}\n    }}", name, fields.join(",\n")),
                             );
                         } else {
-                             println!("  Skipping used struct {} with no convertible fields", name);
+                            println!("  Skipping used struct {} with no convertible fields", name);
                         }
                     }
                     Err(e) => {
@@ -487,7 +486,7 @@ fn collect_type_definitions_from_file(
                                 ),
                             );
                         } else {
-                             println!("  Skipping used enum {} due to complex/invalid variants or no variants", name);
+                            println!("  Skipping used enum {} due to complex/invalid variants or no variants", name);
                         }
                     }
                     Err(e) => {
@@ -501,7 +500,10 @@ fn collect_type_definitions_from_file(
         }
     }
 
-    println!("Collected {} used type definitions from this file", type_defs.len()); // Updated message
+    println!(
+        "Collected {} used type definitions from this file",
+        type_defs.len()
+    ); // Updated message
     Ok(type_defs)
 }
 
@@ -760,7 +762,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
     // Analyze the functions within the identified impl block (if found)
     if let Some(ref impl_item) = &impl_item_with_hyperprocess {
-        if let Some(ref _kebab_name) = &kebab_interface_name { // Ensure kebab_name is available but acknowledge unused in this block
+        if let Some(ref _kebab_name) = &kebab_interface_name {
+            // Ensure kebab_name is available but acknowledge unused in this block
             for item in &impl_item.items {
                 if let ImplItem::Fn(method) = item {
                     let method_name = method.sig.ident.to_string();
@@ -788,7 +791,10 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                             Ok(_) => {
                                 // Convert function name to kebab-case
                                 let func_kebab_name = to_kebab_case(&method_name); // Use different var name
-                                println!("    Processing method: {} -> {}", method_name, func_kebab_name);
+                                println!(
+                                    "    Processing method: {} -> {}",
+                                    method_name, func_kebab_name
+                                );
 
                                 // Generate a signature struct for each attribute type
                                 // This will populate `used_types`
@@ -848,7 +854,10 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             }
         }
     }
-    println!("Identified {} used types from function signatures.", used_types.len());
+    println!(
+        "Identified {} used types from function signatures.",
+        used_types.len()
+    );
 
     // Collect **only used** type definitions from all Rust files
     let mut all_type_defs = HashMap::new(); // Now starts empty, filled by collector
@@ -875,7 +884,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     println!("Collected {} used type definitions", all_type_defs.len());
 
     // Now generate the WIT content for the interface
-    if let (Some(ref iface_name), Some(ref kebab_name), Some(ref _impl_item)) = ( // impl_item no longer needed here
+    if let (Some(ref iface_name), Some(ref kebab_name), Some(ref _impl_item)) = (
+        // impl_item no longer needed here
         &interface_name,
         &kebab_interface_name,
         &impl_item_with_hyperprocess, // Keep this condition to ensure an interface was found
@@ -887,8 +897,12 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         println!("Including {} used type definitions", type_defs.len());
 
         // Generate the final WIT content
-        if signature_structs.is_empty() && type_defs.is_empty() { // Check both sigs and types
-            println!("No functions or used types found for interface {}", iface_name);
+        if signature_structs.is_empty() && type_defs.is_empty() {
+            // Check both sigs and types
+            println!(
+                "No functions or used types found for interface {}",
+                iface_name
+            );
         } else {
             // Start with the interface comment
             let mut content = "    // This interface contains function signature definitions that will be used\n    // by the hyper-bindgen macro to generate async function bindings.\n    //\n    // NOTE: This is currently a hacky workaround since WIT async functions are not\n    // available until WASI Preview 3. Once Preview 3 is integrated into Hyperware,\n    // we should switch to using proper async WIT function signatures instead of\n    // this struct-based approach with hyper-bindgen generating the async stubs.\n".to_string();
@@ -904,11 +918,12 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
             // Add signature structs if any (moved after types for potentially better readability)
             if !signature_structs.is_empty() {
-                 content.push_str(&signature_structs.join("\n\n"));
+                content.push_str(&signature_structs.join("\n\n"));
             }
 
             // Wrap in interface block
-            let final_content = format!("interface {} {{\n{}\n}}\n", kebab_name, content.trim_end()); // Trim trailing whitespace
+            let final_content =
+                format!("interface {} {{\n{}\n}}\n", kebab_name, content.trim_end()); // Trim trailing whitespace
             println!(
                 "Generated interface content for {} with {} signature structs and {} type definitions",
                 iface_name,
@@ -926,7 +941,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             println!("Successfully wrote WIT file");
         }
     } else {
-         println!("No valid hyperprocess interface found in lib.rs"); // More specific message
+        println!("No valid hyperprocess interface found in lib.rs"); // More specific message
     }
 
     // Return statement remains the same logic
