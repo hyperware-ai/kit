@@ -384,8 +384,8 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
         ) + &params.join(", ")
     };
 
-    // Wrap the return type in SendResult
-    let wrapped_return_type = format!("SendResult<{}>", return_type);
+    // Wrap the return type in a Result<_, AppSendError>
+    let wrapped_return_type = format!("Result<{}, AppSendError>", return_type);
 
     // For HTTP endpoints, generate commented-out implementation
     if signature.attr_type == "http" {
@@ -427,7 +427,7 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
         };
 
         return format!(
-            "// /// Generated stub for `{}` {} RPC call\n// /// HTTP endpoint - uncomment to implement\n// pub async fn {}({}) -> {} {{\n//     // TODO: Implement HTTP endpoint\n//     SendResult::Success({})\n// }}",
+            "// /// Generated stub for `{}` {} RPC call\n// /// HTTP endpoint - uncomment to implement\n// pub async fn {}({}) -> {} {{\n//     // TODO: Implement HTTP endpoint\n//     Ok({})\n// }}",
             signature.function_name,
             signature.attr_type,
             full_function_name,
@@ -496,7 +496,7 @@ process_macros = "0.1.0"
 futures-util = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-hyperware_app_common = { git = "https://github.com/hyperware-ai/hyperprocess-macro", rev = "df8f395" }
+hyperware_app_common = { git = "https://github.com/hyperware-ai/hyperprocess-macro", rev = "a485cd1" }
 once_cell = "1.20.2"
 futures = "0.3"
 uuid = { version = "1.0" }
@@ -635,7 +635,7 @@ crate-type = ["cdylib", "lib"]
     lib_rs.push_str("/// Generated caller utilities for RPC function stubs\n\n");
 
     // Add global imports
-    lib_rs.push_str("pub use hyperware_app_common::SendResult;\n");
+    lib_rs.push_str("pub use hyperware_app_common::AppSendError;\n");
     lib_rs.push_str("pub use hyperware_app_common::send;\n");
     lib_rs.push_str("use hyperware_app_common::hyperware_process_lib as hyperware_process_lib;\n");
     lib_rs.push_str("use hyperware_process_lib::{Address, Request};\n");
