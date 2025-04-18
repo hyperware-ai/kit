@@ -1,10 +1,12 @@
 use crate::hyperware::process::file_transfer::{
     Request as TransferRequest, Response as TransferResponse,
 };
-use hyperware_process_lib::{await_next_message_body, call_init, println, Address, Message, Request};
+use hyperware_process_lib::{
+    await_next_message_body, call_init, println, Address, Message, Request,
+};
 
 wit_bindgen::generate!({
-    path: "target/wit",
+    path: "../target/wit",
     world: "file-transfer-template-dot-os-v0",
     generate_unused_types: true,
     additional_derives: [serde::Deserialize, serde::Serialize, process_macros::SerdeJsonInto],

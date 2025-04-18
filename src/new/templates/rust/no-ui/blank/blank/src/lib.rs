@@ -1,7 +1,7 @@
 use hyperware_process_lib::{await_message, call_init, println, Address};
 
 wit_bindgen::generate!({
-    path: "target/wit",
+    path: "../target/wit",
     world: "process-v1",
 });
 

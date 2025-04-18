@@ -5,3 +5,4 @@ src/new/includes.rs
 src/new/templates/**/Cargo.lock
 src/new/templates/**/*.wasm
 src/new/templates/**/*.zip
+**/.DS_Store

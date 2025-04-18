@@ -5,7 +5,7 @@ use crate::hyperware::process::standard::Address as WitAddress;
 use hyperware_process_lib::{our_capabilities, spawn, Address, OnExit, Request, Response};
 
 wit_bindgen::generate!({
-    path: "target/wit",
+    path: "../target/wit",
     world: "file-transfer-worker-api-v0",
     generate_unused_types: true,
     additional_derives: [serde::Deserialize, serde::Serialize, process_macros::SerdeJsonInto],
