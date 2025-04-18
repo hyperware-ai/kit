@@ -519,38 +519,44 @@ fn find_rust_projects(base_dir: &Path) -> Vec<PathBuf> {
     {
         let path = entry.path();
 
-        if path.is_dir() && path != base_dir {
-            let cargo_toml = path.join("Cargo.toml");
-            println!("Checking {}", cargo_toml.display());
+        if !path.is_dir() || path == base_dir {
+            continue;
+        }
+        let cargo_toml = path.join("Cargo.toml");
+        println!("Checking {}", cargo_toml.display());
 
-            if cargo_toml.exists() {
-                // Try to read and parse Cargo.toml
-                if let Ok(content) = fs::read_to_string(&cargo_toml) {
-                    if let Ok(cargo_data) = content.parse::<Value>() {
-                        // Check for the specific metadata
-                        if let Some(metadata) = cargo_data
-                            .get("package")
-                            .and_then(|p| p.get("metadata"))
-                            .and_then(|m| m.get("component"))
-                        {
-                            if let Some(package) = metadata.get("package") {
-                                if let Some(package_str) = package.as_str() {
-                                    println!(
-                                        "  Found package.metadata.component.package = {:?}",
-                                        package_str
-                                    );
-                                    if package_str == "hyperware:process" {
-                                        println!("  Adding project: {}", path.display());
-                                        projects.push(path.to_path_buf());
-                                    }
-                                }
-                            }
-                        } else {
-                            println!("  No package.metadata.component metadata found");
-                        }
-                    }
-                }
-            }
+        if !cargo_toml.exists() {
+            continue;
+        }
+        // Try to read and parse Cargo.toml
+        let Ok(content) = fs::read_to_string(&cargo_toml) else {
+            continue;
+        };
+        let Ok(cargo_data) = content.parse::<Value>() else {
+            continue;
+        };
+        // Check for the specific metadata
+        let Some(metadata) = cargo_data
+            .get("package")
+            .and_then(|p| p.get("metadata"))
+            .and_then(|m| m.get("component"))
+        else {
+            println!("  No package.metadata.component metadata found");
+            continue;
+        };
+        let Some(package) = metadata.get("package") else {
+            continue;
+        };
+        let Some(package_str) = package.as_str() else {
+            continue;
+        };
+        println!(
+            "  Found package.metadata.component.package = {:?}",
+            package_str
+        );
+        if package_str == "hyperware:process" {
+            println!("  Adding project: {}", path.display());
+            projects.push(path.to_path_buf());
         }
     }
 
@@ -703,55 +709,57 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
     println!("Scanning for impl blocks with hyperprocess attribute");
     for item in &ast.items {
-        if let Item::Impl(impl_item) = item {
-            // Check if this impl block has a #[hyperprocess] attribute
-            if let Some(attr) = impl_item
-                .attrs
-                .iter()
-                .find(|attr| attr.path().is_ident("hyperprocess"))
-            {
-                println!("Found hyperprocess attribute");
+        let Item::Impl(impl_item) = item else {
+            continue;
+        };
+        // Check if this impl block has a #[hyperprocess] attribute
+        if let Some(attr) = impl_item
+            .attrs
+            .iter()
+            .find(|attr| attr.path().is_ident("hyperprocess"))
+        {
+            println!("Found hyperprocess attribute");
 
-                // Extract the wit_world name
-                match extract_wit_world(&[attr.clone()]) {
-                    Ok(world_name) => {
-                        println!("Extracted wit_world: {}", world_name);
-                        wit_world = Some(world_name);
+            // Extract the wit_world name
+            match extract_wit_world(&[attr.clone()]) {
+                Ok(world_name) => {
+                    println!("Extracted wit_world: {}", world_name);
+                    wit_world = Some(world_name);
 
-                        // Get the interface name from the impl type
-                        interface_name = impl_item.self_ty.as_ref().as_type_path().map(|tp| {
-                            if let Some(last_segment) = tp.path.segments.last() {
-                                last_segment.ident.to_string()
-                            } else {
-                                "Unknown".to_string()
-                            }
-                        });
-
-                        // Check for "State" suffix and remove it
-                        if let Some(ref name) = interface_name {
-                            // Validate the interface name
-                            if let Err(e) = validate_name(name, "Interface") {
-                                println!("Interface name validation failed: {}", e);
-                                continue; // Skip this impl block if validation fails
-                            }
-
-                            // Remove State suffix if present
-                            let base_name = remove_state_suffix(name);
-
-                            // Convert to kebab-case for file name and interface name
-                            kebab_interface_name = Some(to_kebab_case(&base_name));
-
-                            println!("Interface name: {:?}", interface_name);
-                            println!("Base name: {}", base_name);
-                            println!("Kebab interface name: {:?}", kebab_interface_name);
-
-                            // Save the impl item for later processing
-                            impl_item_with_hyperprocess = Some(impl_item.clone());
-                            break; // Assume only one hyperprocess impl block per lib.rs
+                    // Get the interface name from the impl type
+                    interface_name = impl_item.self_ty.as_ref().as_type_path().map(|tp| {
+                        if let Some(last_segment) = tp.path.segments.last() {
+                            last_segment.ident.to_string()
+                        } else {
+                            "Unknown".to_string()
                         }
+                    });
+
+                    // Check for "State" suffix and remove it
+                    let Some(ref name) = interface_name else {
+                        continue;
+                    };
+                    // Validate the interface name
+                    if let Err(e) = validate_name(name, "Interface") {
+                        println!("Interface name validation failed: {}", e);
+                        continue; // Skip this impl block if validation fails
                     }
-                    Err(e) => println!("Failed to extract wit_world: {}", e),
+
+                    // Remove State suffix if present
+                    let base_name = remove_state_suffix(name);
+
+                    // Convert to kebab-case for file name and interface name
+                    kebab_interface_name = Some(to_kebab_case(&base_name));
+
+                    println!("Interface name: {:?}", interface_name);
+                    println!("Base name: {}", base_name);
+                    println!("Kebab interface name: {:?}", kebab_interface_name);
+
+                    // Save the impl item for later processing
+                    impl_item_with_hyperprocess = Some(impl_item.clone());
+                    break; // Assume only one hyperprocess impl block per lib.rs
                 }
+                Err(e) => println!("Failed to extract wit_world: {}", e),
             }
         }
     }
@@ -765,91 +773,92 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         if let Some(ref _kebab_name) = &kebab_interface_name {
             // Ensure kebab_name is available but acknowledge unused in this block
             for item in &impl_item.items {
-                if let ImplItem::Fn(method) = item {
-                    let method_name = method.sig.ident.to_string();
-                    println!("  Examining method: {}", method_name);
+                let ImplItem::Fn(method) = item else {
+                    continue;
+                };
+                let method_name = method.sig.ident.to_string();
+                println!("  Examining method: {}", method_name);
 
-                    // Check for attribute types
-                    let has_remote = method
-                        .attrs
-                        .iter()
-                        .any(|attr| attr.path().is_ident("remote"));
-                    let has_local = method
-                        .attrs
-                        .iter()
-                        .any(|attr| attr.path().is_ident("local"));
-                    let has_http = method.attrs.iter().any(|attr| attr.path().is_ident("http"));
+                // Check for attribute types
+                let has_remote = method
+                    .attrs
+                    .iter()
+                    .any(|attr| attr.path().is_ident("remote"));
+                let has_local = method
+                    .attrs
+                    .iter()
+                    .any(|attr| attr.path().is_ident("local"));
+                let has_http = method.attrs.iter().any(|attr| attr.path().is_ident("http"));
 
-                    if has_remote || has_local || has_http {
-                        println!(
-                            "    Has relevant attributes: remote={}, local={}, http={}",
-                            has_remote, has_local, has_http
-                        );
+                if has_remote || has_local || has_http {
+                    println!(
+                        "    Has relevant attributes: remote={}, local={}, http={}",
+                        has_remote, has_local, has_http
+                    );
 
-                        // Validate function name
-                        match validate_name(&method_name, "Function") {
-                            Ok(_) => {
-                                // Convert function name to kebab-case
-                                let func_kebab_name = to_kebab_case(&method_name); // Use different var name
-                                println!(
-                                    "    Processing method: {} -> {}",
-                                    method_name, func_kebab_name
-                                );
+                    // Validate function name
+                    match validate_name(&method_name, "Function") {
+                        Ok(_) => {
+                            // Convert function name to kebab-case
+                            let func_kebab_name = to_kebab_case(&method_name); // Use different var name
+                            println!(
+                                "    Processing method: {} -> {}",
+                                method_name, func_kebab_name
+                            );
 
-                                // Generate a signature struct for each attribute type
-                                // This will populate `used_types`
-                                if has_remote {
-                                    match generate_signature_struct(
-                                        &func_kebab_name, // Pass func kebab name
-                                        "remote",
-                                        method,
-                                        &mut used_types, // Pass the main set
-                                    ) {
-                                        Ok(remote_struct) => signature_structs.push(remote_struct),
-                                        Err(e) => println!(
-                                            "    Error generating remote signature struct: {}",
-                                            e
-                                        ),
-                                    }
-                                }
-
-                                if has_local {
-                                    match generate_signature_struct(
-                                        &func_kebab_name, // Pass func kebab name
-                                        "local",
-                                        method,
-                                        &mut used_types, // Pass the main set
-                                    ) {
-                                        Ok(local_struct) => signature_structs.push(local_struct),
-                                        Err(e) => println!(
-                                            "    Error generating local signature struct: {}",
-                                            e
-                                        ),
-                                    }
-                                }
-
-                                if has_http {
-                                    match generate_signature_struct(
-                                        &func_kebab_name, // Pass func kebab name
-                                        "http",
-                                        method,
-                                        &mut used_types, // Pass the main set
-                                    ) {
-                                        Ok(http_struct) => signature_structs.push(http_struct),
-                                        Err(e) => println!(
-                                            "    Error generating HTTP signature struct: {}",
-                                            e
-                                        ),
-                                    }
+                            // Generate a signature struct for each attribute type
+                            // This will populate `used_types`
+                            if has_remote {
+                                match generate_signature_struct(
+                                    &func_kebab_name, // Pass func kebab name
+                                    "remote",
+                                    method,
+                                    &mut used_types, // Pass the main set
+                                ) {
+                                    Ok(remote_struct) => signature_structs.push(remote_struct),
+                                    Err(e) => println!(
+                                        "    Error generating remote signature struct: {}",
+                                        e
+                                    ),
                                 }
                             }
-                            Err(e) => {
-                                println!("    Skipping method with invalid name: {}", e);
+
+                            if has_local {
+                                match generate_signature_struct(
+                                    &func_kebab_name, // Pass func kebab name
+                                    "local",
+                                    method,
+                                    &mut used_types, // Pass the main set
+                                ) {
+                                    Ok(local_struct) => signature_structs.push(local_struct),
+                                    Err(e) => println!(
+                                        "    Error generating local signature struct: {}",
+                                        e
+                                    ),
+                                }
+                            }
+
+                            if has_http {
+                                match generate_signature_struct(
+                                    &func_kebab_name, // Pass func kebab name
+                                    "http",
+                                    method,
+                                    &mut used_types, // Pass the main set
+                                ) {
+                                    Ok(http_struct) => signature_structs.push(http_struct),
+                                    Err(e) => println!(
+                                        "    Error generating HTTP signature struct: {}",
+                                        e
+                                    ),
+                                }
                             }
                         }
-                    } else {
-                        println!("    Skipping method without relevant attributes");
+                        Err(e) => {
+                            println!("    Skipping method with invalid name: {}", e);
+                        }
                     }
+                } else {
+                    println!("    Skipping method without relevant attributes");
                 }
             }
         }
@@ -950,7 +959,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     {
         println!("Returning import statement for interface {}", kebab_iface);
         // Use kebab-case interface name for import
-        Ok(Some((format!("    import {};", kebab_iface), wit_world)))
+        Ok(Some((kebab_iface, wit_world)))
     } else {
         println!("No valid interface found or wit_world extracted."); // Updated message
         Ok(None)
@@ -963,6 +972,7 @@ fn rewrite_wit(
     wit_worlds: &mut HashSet<String>,
     updated_world: &mut bool,
 ) -> Result<()> {
+    // handle existing api files
     for entry in WalkDir::new(api_dir)
         .max_depth(1)
         .into_iter()
@@ -973,101 +983,135 @@ fn rewrite_wit(
         if path.is_file() && path.extension().map_or(false, |ext| ext == "wit") {
             println!("Checking WIT file: {}", path.display());
 
-            if let Ok(content) = fs::read_to_string(path) {
-                if content.contains("world ") {
-                    println!("Found world definition file");
+            let Ok(content) = fs::read_to_string(path) else {
+                continue;
+            };
+            if !content.contains("world ") {
+                continue;
+            }
+            println!("Found world definition file");
 
-                    // Extract the world name and existing imports
-                    let lines: Vec<&str> = content.lines().collect();
-                    let mut world_name = None;
-                    let mut existing_imports = Vec::new();
-                    let mut include_line = "    include process-v1;".to_string();
+            // Extract the world name and existing imports
+            let lines: Vec<&str> = content.lines().collect();
+            let mut world_name = None;
+            let mut existing_imports = Vec::new();
+            let mut include_lines = HashSet::new();
 
-                    for line in &lines {
-                        let trimmed = line.trim();
+            for line in &lines {
+                let trimmed = line.trim();
 
-                        if trimmed.starts_with("world ") {
-                            if let Some(name) = trimmed.split_whitespace().nth(1) {
-                                world_name = Some(name.trim_end_matches(" {").to_string());
-                            }
-                        } else if trimmed.starts_with("import ") {
-                            existing_imports.push(trimmed.to_string());
-                        } else if trimmed.starts_with("include ") {
-                            include_line = trimmed.to_string();
-                        }
+                if trimmed.starts_with("world ") {
+                    if let Some(name) = trimmed.split_whitespace().nth(1) {
+                        world_name = Some(name.trim_end_matches(" {").to_string());
                     }
-
-                    if let Some(world_name) = world_name {
-                        println!("Extracted world name: {}", world_name);
-
-                        // Check if this world name matches the one we're looking for
-                        if wit_worlds.remove(&world_name) || wit_worlds.contains(&world_name[6..]) {
-                            // Determine the include line based on world name
-                            // If world name starts with "types-", use "include lib;" instead
-                            if world_name.starts_with("types-") {
-                                include_line = "    include lib;".to_string();
-                            } else {
-                                // Keep existing include or default to process-v1
-                                if !include_line.contains("include ") {
-                                    include_line = "    include process-v1;".to_string();
-                                }
-                            }
-
-                            // Combine existing imports with new imports
-                            let mut all_imports = existing_imports.clone();
-
-                            for import in new_imports {
-                                let import_stmt = import.trim();
-                                if !all_imports.iter().any(|i| i.trim() == import_stmt) {
-                                    all_imports.push(import_stmt.to_string());
-                                }
-                            }
-
-                            // Make sure all imports have proper indentation
-                            let all_imports_with_indent: Vec<String> = all_imports
-                                .iter()
-                                .map(|import| {
-                                    if import.starts_with("    ") {
-                                        import.clone()
-                                    } else {
-                                        format!("    {}", import.trim())
-                                    }
-                                })
-                                .collect();
-
-                            let imports_section = all_imports_with_indent.join("\n");
-
-                            // Create updated world content with proper indentation
-                            let world_content = format!(
-                                "world {} {{\n{}\n    {}\n}}",
-                                world_name,
-                                imports_section,
-                                include_line.trim()
-                            );
-
-                            println!("Writing updated world definition to {}", path.display());
-                            // Write the updated world file
-                            fs::write(path, world_content).with_context(|| {
-                                format!("Failed to write updated world file: {}", path.display())
-                            })?;
-
-                            println!("Successfully updated world definition");
-                            *updated_world = true;
-                        }
-                    }
+                } else if trimmed.starts_with("import ") {
+                    existing_imports.push(trimmed.to_string());
+                } else if trimmed.starts_with("include ") {
+                    include_lines.insert(trimmed.to_string());
                 }
+            }
+
+            let Some(world_name) = world_name else {
+                continue;
+            };
+
+            println!("Extracted world name: {}", world_name);
+
+            // Check if this world name matches the one we're looking for
+            if wit_worlds.remove(&world_name) || wit_worlds.contains(&world_name[6..]) {
+                let world_content = generate_wit_file(
+                    &world_name,
+                    new_imports,
+                    &existing_imports,
+                    &mut include_lines,
+                )?;
+
+                println!("Writing updated world definition to {}", path.display());
+                // Write the updated world file
+                fs::write(path, world_content).with_context(|| {
+                    format!("Failed to write updated world file: {}", path.display())
+                })?;
+
+                println!("Successfully updated world definition");
+                *updated_world = true;
             }
         }
     }
+
+    // handle non-existing api files
+    for wit_world in wit_worlds.iter() {
+        for prefix in ["", "types-"] {
+            let wit_world = format!("{prefix}{wit_world}");
+            let world_content =
+                generate_wit_file(&wit_world, new_imports, &Vec::new(), &mut HashSet::new())?;
+
+            let path = api_dir.join(format!("{wit_world}.wit"));
+            println!("Writing updated world definition to {}", path.display());
+            // Write the updated world file
+            fs::write(&path, world_content).with_context(|| {
+                format!("Failed to write updated world file: {}", path.display())
+            })?;
+
+            println!("Successfully created new world definition for {wit_world}");
+        }
+        *updated_world = true;
+    }
+
     Ok(())
 }
 
+fn generate_wit_file(
+    world_name: &str,
+    new_imports: &Vec<String>,
+    existing_imports: &Vec<String>,
+    include_lines: &mut HashSet<String>,
+) -> Result<String> {
+    // Determine the include line based on world name
+    // If world name starts with "types-", use "include lib;" instead
+    if world_name.starts_with("types-") {
+        if !include_lines.contains("include lib;") {
+            include_lines.insert("include lib;".to_string());
+        }
+    } else {
+        // Keep existing include or default to process-v1
+        if include_lines.is_empty() {
+            include_lines.insert("include process-v1;".to_string());
+        }
+    }
+
+    // Combine existing imports with new imports
+    let mut all_imports = existing_imports.clone();
+
+    for import in new_imports {
+        let import_stmt = import.trim();
+        if !all_imports.iter().any(|i| i.trim() == import_stmt) {
+            all_imports.push(import_stmt.to_string());
+        }
+    }
+
+    // Make sure all imports have proper indentation
+    let all_imports_with_indent: Vec<String> = all_imports
+        .iter()
+        .map(|import| {
+            if import.starts_with("    ") {
+                import.clone()
+            } else {
+                format!("    {}", import.trim())
+            }
+        })
+        .collect();
+
+    let imports_section = all_imports_with_indent.join("\n");
+
+    // Create updated world content with proper indentation
+    let include_lines: String = include_lines.iter().map(|l| format!("    {l}\n")).collect();
+    let world_content = format!("world {world_name} {{\n{imports_section}\n{include_lines}}}");
+
+    return Ok(world_content);
+}
+
 // Generate WIT files from Rust code
-pub fn generate_wit_files(
-    base_dir: &Path,
-    api_dir: &Path,
-    is_recursive_call: bool,
-) -> Result<(Vec<PathBuf>, Vec<String>)> {
+pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBuf>, Vec<String>)> {
     fs::create_dir_all(&api_dir)?;
 
     // Find all relevant Rust projects
@@ -1088,17 +1132,10 @@ pub fn generate_wit_files(
         println!("Processing project: {}", project_path.display());
 
         match process_rust_project(project_path, api_dir) {
-            Ok(Some((import, wit_world))) => {
-                println!("Got import statement: {}", import);
-                new_imports.push(import.clone());
+            Ok(Some((interface, wit_world))) => {
+                new_imports.push(format!("    import {interface};"));
 
-                // Extract interface name from import statement
-                let interface_name = import
-                    .trim_start_matches("    import ")
-                    .trim_end_matches(";")
-                    .to_string();
-
-                interfaces.push(interface_name);
+                interfaces.push(interface);
                 processed_projects.push(project_path.clone());
 
                 wit_worlds.insert(wit_world);
@@ -1115,45 +1152,6 @@ pub fn generate_wit_files(
     let mut updated_world = false;
 
     rewrite_wit(api_dir, &new_imports, &mut wit_worlds, &mut updated_world)?;
-
-    let rerun_rewrite_wit = !wit_worlds.is_empty();
-    for wit_world in wit_worlds {
-        // Create a new file with the simple world definition
-        let new_file_path = api_dir.join(format!("{}.wit", wit_world));
-        let simple_world_content = format!("world {} {{}}", wit_world);
-
-        println!(
-            "Creating new world definition file: {}",
-            new_file_path.display()
-        );
-        fs::write(&new_file_path, simple_world_content).with_context(|| {
-            format!(
-                "Failed to create new world file: {}",
-                new_file_path.display()
-            )
-        })?;
-
-        let new_file_path = api_dir.join(format!("types-{}.wit", wit_world));
-        let simple_world_content = format!("world types-{} {{}}", wit_world);
-
-        println!(
-            "Creating new world definition file: {}",
-            new_file_path.display()
-        );
-        fs::write(&new_file_path, simple_world_content).with_context(|| {
-            format!(
-                "Failed to create new world file: {}",
-                new_file_path.display()
-            )
-        })?;
-
-        println!("Successfully created new world definition file");
-        updated_world = true;
-    }
-
-    if rerun_rewrite_wit && !is_recursive_call {
-        return generate_wit_files(base_dir, api_dir, true);
-    }
 
     // If no world definitions were found, create a default one
     if !updated_world && !new_imports.is_empty() {

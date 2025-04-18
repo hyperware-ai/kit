@@ -496,7 +496,7 @@ process_macros = "0.1.0"
 futures-util = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-hyperware_app_common = { git = "https://github.com/hyperware-ai/hyperprocess-macro", rev = "034d339" }
+hyperware_app_common = { git = "https://github.com/hyperware-ai/hyperprocess-macro", rev = "47400ab" }
 once_cell = "1.20.2"
 futures = "0.3"
 uuid = { version = "1.0" }

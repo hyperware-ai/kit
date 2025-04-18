@@ -1010,7 +1010,7 @@ async fn compile_rust_wasm_process(
     //  and rewriting all `_`s to `-`s
     // cargo hates `-`s and so outputs with `_`s; Hypermap hates
     //  `_`s and so we convert to and enforce all `-`s
-    let wasm_file_name_cab = package_dir
+    let wasm_file_name_cab = process_dir
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap()
@@ -1815,7 +1815,7 @@ pub async fn execute(
     } else {
         let api_dir = live_dir.join("api");
         let (processed_projects, interfaces) =
-            wit_generator::generate_wit_files(&live_dir, &api_dir, false)?;
+            wit_generator::generate_wit_files(&live_dir, &api_dir)?;
         if interfaces.is_empty() {
             None
         } else {
