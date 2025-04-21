@@ -184,6 +184,55 @@ fn generate_default_value(rust_type: &str) -> String {
     }
 }
 
+fn wit_type_to_ts(wit_type: &str) -> String {
+    match wit_type {
+        // Integer types - all become "number" in TypeScript
+        "s8" | "u8" | "s16" | "u16" | "s32" | "u32" | "s64" | "u64" => "number".to_string(),
+        // Floating point types - also "number" in TypeScript
+        "f32" | "f64" => "number".to_string(),
+        // Other primitive types
+        "string" => "string".to_string(),
+        "str" => "string".to_string(),
+        "char" => "string".to_string(),
+        "bool" => "boolean".to_string(),
+        "_" => "void".to_string(),
+        "unit" => "void".to_string(),
+        // Special types
+        "address" => "Address".to_string(),
+        // Collection types with generics
+        t if t.starts_with("list<") => {
+            let inner_type = &t[5..t.len() - 1];
+            format!("{}[]", wit_type_to_ts(inner_type))
+        }
+        t if t.starts_with("option<") => {
+            let inner_type = &t[7..t.len() - 1];
+            format!("{} | null", wit_type_to_ts(inner_type))
+        }
+        t if t.starts_with("result<") => {
+            let inner_part = &t[7..t.len() - 1];
+            if let Some(comma_pos) = inner_part.find(',') {
+                let ok_type = &inner_part[..comma_pos].trim();
+                let err_type = &inner_part[comma_pos + 1..].trim();
+                format!(
+                    "{{ Ok: {} }} | {{ Err: {} }}",
+                    wit_type_to_ts(ok_type),
+                    wit_type_to_ts(err_type)
+                )
+            } else {
+                format!("{{ Ok: {} }} | {{ Err: null }}", wit_type_to_ts(inner_part))
+            }
+        }
+        t if t.starts_with("tuple<") => {
+            let inner_types = &t[6..t.len() - 1];
+            let ts_types: Vec<String> =
+                inner_types.split(", ").map(|t| wit_type_to_ts(t)).collect();
+            format!("[{}]", ts_types.join(", "))
+        }
+        // Custom types (assumed to be in kebab-case) need to be converted to PascalCase
+        _ => to_pascal_case(wit_type).to_string(),
+    }
+}
+
 // Structure to represent a field in a WIT signature struct
 struct SignatureField {
     name: String,

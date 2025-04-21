@@ -518,16 +518,16 @@ fn find_rust_projects(base_dir: &Path) -> Vec<PathBuf> {
         .filter_map(Result::ok)
     {
         let path = entry.path();
-
         if !path.is_dir() || path == base_dir {
             continue;
         }
+
         let cargo_toml = path.join("Cargo.toml");
         println!("Checking {}", cargo_toml.display());
-
         if !cargo_toml.exists() {
             continue;
         }
+
         // Try to read and parse Cargo.toml
         let Ok(content) = fs::read_to_string(&cargo_toml) else {
             continue;
@@ -535,6 +535,7 @@ fn find_rust_projects(base_dir: &Path) -> Vec<PathBuf> {
         let Ok(cargo_data) = content.parse::<Value>() else {
             continue;
         };
+
         // Check for the specific metadata
         let Some(metadata) = cargo_data
             .get("package")
