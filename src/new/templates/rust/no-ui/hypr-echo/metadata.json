@@ -1,0 +1,19 @@
+{
+  "name": "hypr-echo",
+  "description": "Template process for app framework.",
+  "image": "",
+  "properties": {
+    "package_name": "hypr-echo",
+    "current_version": "0.1.0",
+    "publisher": "template.os",
+    "mirrors": [],
+    "code_hashes": {
+      "0.1.0": ""
+    },
+    "wit_version": 1,
+    "dependencies": [  
+    ]
+  },
+  "external_url": "https://hyperware.ai",
+  "animation_url": ""
+}

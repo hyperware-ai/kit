@@ -1,0 +1,17 @@
+[
+    {
+        "process_name": "hypr-echo-test",
+        "process_wasm_path": "/hypr-echo-test.wasm",
+        "on_exit": "None",
+        "request_networking": true,
+        "request_capabilities": [
+            "hypr-echo:hypr-echo:template.os",
+            "http-client:distro:sys"
+        ],
+        "grant_capabilities": [
+            "hypr-echo:hypr-echo:template.os",
+            "http-client:distro:sys"
+        ],
+        "public": true
+    }
+]

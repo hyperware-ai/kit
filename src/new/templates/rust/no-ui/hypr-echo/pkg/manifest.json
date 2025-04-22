@@ -1,0 +1,21 @@
+[
+  {
+    "process_name": "hypr-echo",
+    "process_wasm_path": "/hypr-echo.wasm",
+    "on_exit": "Restart",
+    "request_networking": true,
+    "request_capabilities": [
+      "http-server:distro:sys",
+      "http-client:distro:sys",
+      "vfs:distro:sys",
+      "homepage:homepage:sys"
+    ],
+    "grant_capabilities": [
+      "http-server:distro:sys",
+      "http-client:distro:sys",
+      "vfs:distro:sys",
+      "homepage:homepage:sys"
+    ],
+    "public": false
+  }
+]
