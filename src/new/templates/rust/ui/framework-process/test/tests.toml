@@ -1,0 +1,22 @@
+runtime = { FetchVersion = "latest" }
+persist_home = false
+runtime_build_release = false
+always_print_node_output = false
+
+
+[[tests]]
+dependency_package_paths = [".."]
+setup_packages = [{ path = "..", run = true }]
+setup_scripts = []
+test_package_paths = ["hyperprocess-test"]
+test_scripts = []
+timeout_secs = 35
+fakechain_router = 8545
+hyperapp = true
+
+
+[[tests.nodes]]
+port = 8080
+home = "home/hyperproces"
+fake_node_name = "hyperprocess.os"
+runtime_verbosity = 2

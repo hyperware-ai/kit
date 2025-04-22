@@ -23,6 +23,7 @@ pub enum Template {
     Echo,
     Fibonacci,
     FileTransfer,
+    FrameworkProcess,
 }
 
 impl Language {
@@ -44,6 +45,7 @@ impl Template {
             Template::Echo => "echo",
             Template::Fibonacci => "fibonacci",
             Template::FileTransfer => "file-transfer",
+            Template::FrameworkProcess => "framework-process",
         }
         .to_string()
     }
@@ -68,7 +70,8 @@ impl From<&String> for Template {
             "echo" => Template::Echo,
             "fibonacci" => Template::Fibonacci,
             "file-transfer" => Template::FileTransfer,
-            _ => panic!("kit: template must be 'blank', 'chat', 'echo', or 'fibonacci'; not '{s}'"),
+            "framework-process" => Template::FrameworkProcess,
+            _ => panic!("kit: template must be 'blank', 'chat', 'echo', 'fibonacci', 'file-transfer', or 'framework-process'; not '{s}'"),
         }
     }
 }

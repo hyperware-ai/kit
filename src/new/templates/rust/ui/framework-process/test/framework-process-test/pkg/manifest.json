@@ -1,0 +1,17 @@
+[
+    {
+        "process_name": "framework-process-test",
+        "process_wasm_path": "/framework-process-test.wasm",
+        "on_exit": "None",
+        "request_networking": true,
+        "request_capabilities": [
+            "framework-process:framework-process:template.os",
+            "http-client:distro:sys"
+        ],
+        "grant_capabilities": [
+            "framework-process:framework-process:template.os",
+            "http-client:distro:sys"
+        ],
+        "public": true
+    }
+]
