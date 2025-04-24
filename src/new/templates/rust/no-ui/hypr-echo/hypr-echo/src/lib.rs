@@ -5,7 +5,7 @@ use hyperware_process_lib::{
 };
 use hyperprocess_macro::hyperprocess;
 
-#[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub struct HyprEchoState {}
 
 #[derive(Serialize, Deserialize, Debug)]
