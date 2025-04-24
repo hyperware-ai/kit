@@ -9,13 +9,14 @@ use hyperprocess_macro::hyperprocess;
 pub struct HyprEchoState {}
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct HyprEchoReq {
-    payload: String,
+pub struct Argument {
+    header: String,
+    body: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct HyprEchoResp {
-    payload: String,
+pub struct ReturnValue {
+    result: String,
 }
 
 #[hyperprocess(
@@ -35,7 +36,6 @@ pub struct HyprEchoResp {
     wit_world = "hypr-echo-template-dot-os-v0"
 )]
 
-
 impl HyprEchoState {
     // Initialize the process, every application needs an init function
     #[init]
@@ -43,27 +43,28 @@ impl HyprEchoState {
         println!("init HyprEcho");
     }
 
-// Endpoint accepting both local, remote Hyperware requests, and HTTP requests
-#[local]
-#[remote]
-#[http]
-async fn echo(&self, req: HyprEchoReq) -> HyprEchoResp {
-    println!("got {:?}", req);
-    HyprEchoResp { payload: "Ack".to_string() }
-}
+    // Endpoint accepting both local, remote Hyperware requests, and HTTP requests
+    #[local]
+    #[remote]
+    #[http]
+    async fn echo(&self, arg: Argument) -> ReturnValue {
+        println!("header: {:?}, body: {:?}", arg.header, arg.body);
+
+        ReturnValue { result: "Ack".to_string() }
+    }
 
     // Endpoint accepting WebSocket requests
     #[ws]
-    fn ws_echo(&mut self, channel_id: u32, message_type: WsMessageType, blob: LazyLoadBlob) {
+    async fn ws_echo(&mut self, channel_id: u32, message_type: WsMessageType, blob: LazyLoadBlob) {
         println!("got: type={:?}, blob={:?}", message_type, blob);
-        
-        send_ws_push(
-            channel_id,
-            WsMessageType::Text,
-            LazyLoadBlob {
-                mime: Some("application/json".to_string()),
-                bytes: serde_json::to_vec("Ack").unwrap(),
-            },
-        );
+
+           send_ws_push(
+               channel_id,
+               WsMessageType::Text,
+               LazyLoadBlob {
+                    mime: Some("application/json".to_string()),
+                    bytes: serde_json::to_vec("Ack").unwrap(),
+                },
+            );
     }
 }
