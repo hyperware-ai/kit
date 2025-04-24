@@ -1,9 +1,9 @@
 {
-  "name": "hypr-echo",
-  "description": "Template process for app framework.",
+  "name": "Hyperapp Echo",
+  "description": "Echo process for Hyperapp framework.",
   "image": "",
   "properties": {
-    "package_name": "hypr-echo",
+    "package_name": "hyperapp-echo",
     "current_version": "0.1.0",
     "publisher": "template.os",
     "mirrors": [],

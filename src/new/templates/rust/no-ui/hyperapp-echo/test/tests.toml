@@ -17,6 +17,6 @@ hyperapp = true
 
 [[tests.nodes]]
 port = 8080
-home = "home/hypr-echo-test"
-fake_node_name = "hypr-echo.os"
+home = "home/hyperapp-echo-test"
+fake_node_name = "hyperapp-echo.os"
 runtime_verbosity = 2

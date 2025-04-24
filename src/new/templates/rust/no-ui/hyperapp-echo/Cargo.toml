@@ -5,7 +5,7 @@ panic = "abort"
 
 [workspace]
 members = [
-    "hypr-echo",
-    "test/hypr-echo-test/hypr-echo-test",
+    "hyperapp-echo",
+    "test/hyperapp-echo-test/hyperapp-echo-test",
 ]
 resolver = "2"

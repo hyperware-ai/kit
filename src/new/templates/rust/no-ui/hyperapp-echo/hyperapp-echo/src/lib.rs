@@ -1,12 +1,14 @@
 use serde::{Serialize, Deserialize};
 use hyperware_process_lib::{
     LazyLoadBlob,
-    http::server::{WsMessageType, send_ws_push}
+    http::server::{WsMessageType, send_ws_push},
+    homepage::add_to_homepage,
 };
 use hyperprocess_macro::hyperprocess;
 
+
 #[derive(Default, Debug, Serialize, Deserialize)]
-pub struct HyprEchoState {}
+pub struct HyperappEchoState {}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Argument {
@@ -20,7 +22,7 @@ pub struct ReturnValue {
 }
 
 #[hyperprocess(
-    name = "HyprEcho",
+    name = "HyperappEcho",
     ui = None,
     endpoints = vec![
         Binding::Http {
@@ -33,14 +35,15 @@ pub struct ReturnValue {
         }
     ],
     save_config = SaveOptions::Never,
-    wit_world = "hypr-echo-template-dot-os-v0"
+    wit_world = "hyperapp-echo-template-dot-os-v0"
 )]
 
-impl HyprEchoState {
+impl HyperappEchoState {
     // Initialize the process, every application needs an init function
     #[init]
     async fn initialize(&mut self) {
-        println!("init HyprEcho");
+        println!("init HyperappEcho");
+        add_to_homepage("HyperappEcho", Some(ICON), Some(""), None);
     }
 
     // Endpoint accepting both local, remote Hyperware requests, and HTTP requests

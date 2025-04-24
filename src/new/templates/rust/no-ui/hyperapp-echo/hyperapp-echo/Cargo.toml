@@ -24,7 +24,7 @@ crate-type = ["cdylib"]
 
 [package]
 edition = "2021"
-name = "hypr-echo"
+name = "hyperapp-echo"
 version = "0.1.0"
 
 [package.metadata.component]

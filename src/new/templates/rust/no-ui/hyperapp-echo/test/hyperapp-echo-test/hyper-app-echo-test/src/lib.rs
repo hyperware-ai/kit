@@ -5,7 +5,7 @@ mod tester_lib;
 use hyperware_app_common::SendResult;
 
 async_test_suite!(
-    "test-hypr-echo-template-dot-os-v0",
+    "test-hyperapp-echo-template-dot-os-v0",
 
     test_basic_math: async {
         if 2 + 2 != 4 {
@@ -16,7 +16,7 @@ async_test_suite!(
 
     // Test local add call
     test_local_add_call: async {
-        let address: Address = ("hypr-echo.os", "hypr-echo", "hypr-echo", "template.os").into();
+        let address: Address = ("hyperapp-echo.os", "hyperapp-echo", "hyperapp-echo", "template.os").into();
         let value = "World".to_string();
         // Pass only the value, matching the generated stub signature
         let result = add_to_state_local_rpc(&address, value).await;
@@ -27,7 +27,7 @@ async_test_suite!(
 
     // Test local get call
     test_local_get_call: async {
-        let address: Address = ("hypr-echo.os", "hypr-echo", "hypr-echo", "template.os").into();
+        let address: Address = ("hyperapp-echo.os", "hyperapp-echo", "hyperapp-echo", "template.os").into();
         let result = get_state_local_rpc(&address).await;
         print_to_terminal(0, &format!("get_state_local_rpc result: {:?}", result));
         // Assuming the call should succeed

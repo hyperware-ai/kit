@@ -1,7 +1,7 @@
 [
   {
-    "process_name": "hypr-echo",
-    "process_wasm_path": "/hypr-echo.wasm",
+    "process_name": "hyperapp-echo",
+    "process_wasm_path": "/hyperapp-echo.wasm",
     "on_exit": "Restart",
     "request_networking": true,
     "request_capabilities": [

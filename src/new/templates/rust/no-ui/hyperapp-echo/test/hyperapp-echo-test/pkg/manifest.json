@@ -1,16 +1,16 @@
 [
     {
-        "process_name": "hypr-echo-test",
-        "process_wasm_path": "/hypr-echo-test.wasm",
+        "process_name": "hyperapp-echo-test",
+        "process_wasm_path": "/hyperapp-echo-test.wasm",
         "on_exit": "None",
         "request_networking": true,
         "request_capabilities": [
             "http-client:distro:sys",
-            "hypr-echo:hypr-echo:template.os"
+            "hyperapp-echo:hyperapp-echo:template.os"
         ],
         "grant_capabilities": [
             "http-client:distro:sys",
-            "hypr-echo:hypr-echo:template.os"
+            "hyperapp-echo:hyperapp-echo:template.os"
         ],
         "public": true
     }
