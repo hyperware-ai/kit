@@ -5,12 +5,12 @@
         "on_exit": "None",
         "request_networking": true,
         "request_capabilities": [
-            "hypr-echo:hypr-echo:template.os",
-            "http-client:distro:sys"
+            "http-client:distro:sys",
+            "hypr-echo:hypr-echo:template.os"
         ],
         "grant_capabilities": [
-            "hypr-echo:hypr-echo:template.os",
-            "http-client:distro:sys"
+            "http-client:distro:sys",
+            "hypr-echo:hypr-echo:template.os"
         ],
         "public": true
     }
