@@ -31,7 +31,7 @@ pub struct HyprEchoResp {
             config: WsBindingConfig::new(false, false, false),
         }
     ],
-    save_config = SaveOptions::Never, // Changed as state is removed
+    save_config = SaveOptions::Never,
     wit_world = "hypr-echo-template-dot-os-v0"
 )]
 
@@ -48,9 +48,7 @@ impl HyprEchoState {
 #[remote]
 #[http]
 async fn echo(&self, req: HyprEchoReq) -> HyprEchoResp {
-    // Print the received request, similar to the example snippet
     println!("got {:?}", req);
-    // Return a fixed "Ack" response, mapped to the HyprEchoResp structure
     HyprEchoResp { payload: "Ack".to_string() }
 }
 
@@ -58,7 +56,7 @@ async fn echo(&self, req: HyprEchoReq) -> HyprEchoResp {
     #[ws]
     fn ws_echo(&mut self, channel_id: u32, message_type: WsMessageType, blob: LazyLoadBlob) {
         println!("got: type={:?}, blob={:?}", message_type, blob);
-        // Respond with "echo"
+        
         send_ws_push(
             channel_id,
             WsMessageType::Text,
