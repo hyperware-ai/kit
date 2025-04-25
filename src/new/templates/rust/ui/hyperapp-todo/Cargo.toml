@@ -1,0 +1,11 @@
+[profile.release]
+lto = true
+opt-level = "s"
+panic = "abort"
+
+[workspace]
+members = [
+    "hyperapp-todo",
+    "test/hyperapp-todo-test/hyperapp-todo-test",
+]
+resolver = "2"

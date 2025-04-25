@@ -1072,7 +1072,7 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                     "echo", 
                     "fibonacci", 
                     "file-transfer", 
-                    "framework-process"
+                    "hyperapp-todo"
                 ])
                 .default_value("chat")
             )

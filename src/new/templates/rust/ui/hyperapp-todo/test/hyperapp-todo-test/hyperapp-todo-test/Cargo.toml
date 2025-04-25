@@ -1,0 +1,26 @@
+[package]
+name = "hyperapp-todo-test"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies.caller-utils]
+path = "../../../target/caller-utils"
+
+[dependencies.hyperware_app_common]
+git = "https://github.com/hyperware-ai/hyperprocess-macro"
+rev = "b6ad495"
+
+[dependencies]
+anyhow = "1.0"
+process_macros = "0.1.0"
+hyperware_process_lib = { git = "https://github.com/hyperware-ai/process_lib", features = ["logging"], rev = "b7c9d27" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wit-bindgen = "0.36.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.component]
+package = "hyperware:process"

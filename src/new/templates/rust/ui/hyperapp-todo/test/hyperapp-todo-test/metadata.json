@@ -1,0 +1,22 @@
+{
+    "name": "Hyperapp Todo Test",
+    "description": "A test showcasing the hyperapp todo app.",
+    "image": "",
+    "properties": {
+        "package_name": "hyperapp-todo-test",
+        "current_version": "0.1.0",
+        "publisher": "template.os",
+        "mirrors": [],
+        "code_hashes": {
+            "0.1.0": ""
+        },
+        "wit_version": 1,
+        "dependencies": [
+            "hyperapp-todo:template.os",
+            "tester:sys"
+        ]
+    },
+    "external_url": "",
+    "animation_url": ""
+}
+
