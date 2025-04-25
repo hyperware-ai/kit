@@ -1,9 +1,9 @@
 {
-    "name": "HyprEcho Test",
+    "name": "Hyperapp Echo Test",
     "description": "A test showcasing the hyperware app framework.",
     "image": "",
     "properties": {
-        "package_name": "hypr-echo-test",
+        "package_name": "hyperapp-echo-test",
         "current_version": "0.1.0",
         "publisher": "template.os",
         "mirrors": [],
@@ -12,7 +12,7 @@
         },
         "wit_version": 1,
         "dependencies": [
-            "hypr-echo:template.os",
+            "hyperapp-echo:template.os",
             "tester:sys"
         ]
     },

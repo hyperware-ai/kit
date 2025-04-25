@@ -318,6 +318,15 @@ pub fn execute(
     );
     let ui_prefix = format!("{}/{}/", ui_infix, template.to_string());
     let test_prefix = format!("test/{}/", template.to_string());
+
+
+    println!("DEBUG: PATH_TO_CONTENT keys related to hyperapp-echo:");
+    for (path, _) in PATH_TO_CONTENT.iter() {
+        if path.contains("hyperapp-echo") {
+            println!("  {}", path);
+        }
+    }
+    
     let mut path_to_content: HashMap<String, String> = PATH_TO_CONTENT
         .iter()
         .filter_map(|(path, content)| {

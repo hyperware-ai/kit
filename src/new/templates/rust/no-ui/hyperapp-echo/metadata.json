@@ -12,6 +12,7 @@
     },
     "wit_version": 1,
     "dependencies": [  
+      "hyperapp-echo:template.os"
     ]
   },
   "external_url": "https://hyperware.ai",

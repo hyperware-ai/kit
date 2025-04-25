@@ -8,7 +8,7 @@ always_print_node_output = false
 dependency_package_paths = [".."]
 setup_packages = [{ path = "..", run = true }]
 setup_scripts = []
-test_package_paths = ["hypr-echo-test"]
+test_package_paths = ["hyperapp-echo-test"]
 test_scripts = []
 timeout_secs = 35
 fakechain_router = 8545
@@ -17,6 +17,12 @@ hyperapp = true
 
 [[tests.nodes]]
 port = 8080
+home = "home/hyperapp-echo-test"
+fake_node_name = "host.os"
+runtime_verbosity = 2
+
+[[tests.nodes]]
+port = 8081
 home = "home/hyperapp-echo-test"
 fake_node_name = "hyperapp-echo.os"
 runtime_verbosity = 2

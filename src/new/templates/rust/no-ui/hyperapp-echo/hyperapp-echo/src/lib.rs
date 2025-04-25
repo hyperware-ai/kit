@@ -1,9 +1,4 @@
 use serde::{Serialize, Deserialize};
-use hyperware_process_lib::{
-    LazyLoadBlob,
-    http::server::{WsMessageType, send_ws_push},
-    homepage::add_to_homepage,
-};
 use hyperprocess_macro::hyperprocess;
 
 
@@ -18,7 +13,7 @@ pub struct Argument {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ReturnValue {
-    result: String,
+    response: String,
 }
 
 #[hyperprocess(
@@ -43,7 +38,6 @@ impl HyperappEchoState {
     #[init]
     async fn initialize(&mut self) {
         println!("init HyperappEcho");
-        add_to_homepage("HyperappEcho", Some(ICON), Some(""), None);
     }
 
     // Endpoint accepting both local, remote Hyperware requests, and HTTP requests
@@ -53,21 +47,7 @@ impl HyperappEchoState {
     async fn echo(&self, arg: Argument) -> ReturnValue {
         println!("header: {:?}, body: {:?}", arg.header, arg.body);
 
-        ReturnValue { result: "Ack".to_string() }
+        ReturnValue { response: "Ack".to_string() }
     }
 
-    // Endpoint accepting WebSocket requests
-    #[ws]
-    async fn ws_echo(&mut self, channel_id: u32, message_type: WsMessageType, blob: LazyLoadBlob) {
-        println!("got: type={:?}, blob={:?}", message_type, blob);
-
-           send_ws_push(
-               channel_id,
-               WsMessageType::Text,
-               LazyLoadBlob {
-                    mime: Some("application/json".to_string()),
-                    bytes: serde_json::to_vec("Ack").unwrap(),
-                },
-            );
-    }
 }

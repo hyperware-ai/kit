@@ -1,4 +1,5 @@
 api
+!test/hyperapp-echo-test/api
 *swp
 **/target
 pkg/*.wasm
