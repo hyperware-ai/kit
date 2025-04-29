@@ -6,6 +6,7 @@ use color_eyre::{
     eyre::{bail, WrapErr},
     Result,
 };
+use tracing::{debug, info, instrument, warn};
 
 use toml::Value;
 use walkdir::WalkDir;
@@ -34,8 +35,9 @@ pub fn to_pascal_case(s: &str) -> String {
 }
 
 // Find the world name in the world WIT file, prioritizing types-prefixed worlds
+#[instrument(skip(api_dir))]
 fn find_world_names(api_dir: &Path) -> Result<Vec<String>> {
-    println!("Looking in {api_dir:?} for world names...");
+    info!(dir = ?api_dir, "Looking for world names...");
     let mut world_names = Vec::new();
 
     // Look for world definition files
@@ -49,7 +51,7 @@ fn find_world_names(api_dir: &Path) -> Result<Vec<String>> {
         if path.is_file() && path.extension().map_or(false, |ext| ext == "wit") {
             if let Ok(content) = fs::read_to_string(path) {
                 if content.contains("world ") {
-                    println!("Analyzing world definition file: {}", path.display());
+                    debug!(file = %path.display(), "Analyzing potential world definition file");
 
                     // Extract the world name
                     let lines: Vec<&str> = content.lines().collect();
@@ -57,16 +59,16 @@ fn find_world_names(api_dir: &Path) -> Result<Vec<String>> {
                     if let Some(world_line) =
                         lines.iter().find(|line| line.trim().starts_with("world "))
                     {
-                        println!("World line: {}", world_line);
+                        debug!(line = %world_line, "Found world line");
 
                         if let Some(world_name) = world_line.trim().split_whitespace().nth(1) {
                             let clean_name = world_name.trim_end_matches(" {");
-                            println!("Extracted world name: {}", clean_name);
+                            debug!(name = %clean_name, "Extracted potential world name");
 
                             // Check if this is a types-prefixed world
                             if clean_name.starts_with("types-") {
                                 world_names.push(clean_name.to_string());
-                                println!("Found types world: {}", clean_name);
+                                info!(name = %clean_name, "Found types-prefixed world");
                             }
                         }
                     }
@@ -82,6 +84,7 @@ fn find_world_names(api_dir: &Path) -> Result<Vec<String>> {
 }
 
 // Convert WIT type to Rust type - IMPROVED with more Rust primitives
+#[instrument(level = "trace")]
 fn wit_type_to_rust(wit_type: &str) -> String {
     match wit_type {
         // Integer types
@@ -141,6 +144,7 @@ fn wit_type_to_rust(wit_type: &str) -> String {
 }
 
 // Generate default value for Rust type - IMPROVED with additional types
+#[instrument(level = "trace")]
 fn generate_default_value(rust_type: &str) -> String {
     match rust_type {
         // Integer types
@@ -185,12 +189,14 @@ fn generate_default_value(rust_type: &str) -> String {
 }
 
 // Structure to represent a field in a WIT signature struct
+#[derive(Debug)]
 struct SignatureField {
     name: String,
     wit_type: String,
 }
 
 // Structure to represent a WIT signature struct
+#[derive(Debug)]
 struct SignatureStruct {
     function_name: String,
     attr_type: String,
@@ -198,7 +204,9 @@ struct SignatureStruct {
 }
 
 // Find all interface imports in the world WIT file
+#[instrument(skip(api_dir))]
 fn find_interfaces_in_world(api_dir: &Path) -> Result<Vec<String>> {
+    info!(dir = ?api_dir, "Finding interface imports in world definitions");
     let mut interfaces = Vec::new();
 
     // Find world definition files
@@ -212,7 +220,7 @@ fn find_interfaces_in_world(api_dir: &Path) -> Result<Vec<String>> {
         if path.is_file() && path.extension().map_or(false, |ext| ext == "wit") {
             if let Ok(content) = fs::read_to_string(path) {
                 if content.contains("world ") {
-                    println!("Analyzing world definition file: {}", path.display());
+                    debug!(file = %path.display(), "Analyzing world definition file for imports");
 
                     // Extract import statements
                     for line in content.lines() {
@@ -224,20 +232,21 @@ fn find_interfaces_in_world(api_dir: &Path) -> Result<Vec<String>> {
                                 .trim();
 
                             interfaces.push(interface.to_string());
-                            println!("  Found interface import: {}", interface);
+                            debug!(interface = %interface, "Found interface import");
                         }
                     }
                 }
             }
         }
     }
-
+    info!(count = interfaces.len(), interfaces = ?interfaces, "Found interface imports");
     Ok(interfaces)
 }
 
 // Parse WIT file to extract function signatures and type definitions
+#[instrument(skip(file_path))]
 fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>)> {
-    println!("Parsing WIT file: {}", file_path.display());
+    info!(file = %file_path.display(), "Parsing WIT file");
 
     let content = fs::read_to_string(file_path)
         .with_context(|| format!("Failed to read WIT file: {}", file_path.display()))?;
@@ -258,7 +267,7 @@ fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>
                 .trim_start_matches("record ")
                 .trim_end_matches(" {")
                 .trim();
-            println!("  Found type: record {}", record_name);
+            debug!(name = %record_name, "Found type definition (record)");
             type_names.push(record_name.to_string());
         }
         // Look for variant definitions (enums)
@@ -267,7 +276,7 @@ fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>
                 .trim_start_matches("variant ")
                 .trim_end_matches(" {")
                 .trim();
-            println!("  Found type: variant {}", variant_name);
+            debug!(name = %variant_name, "Found type definition (variant)");
             type_names.push(variant_name.to_string());
         }
         // Look for signature record definitions
@@ -276,18 +285,19 @@ fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>
                 .trim_start_matches("record ")
                 .trim_end_matches(" {")
                 .trim();
-            println!("  Found record: {}", record_name);
+            debug!(name = %record_name, "Found signature record");
 
             // Extract function name and attribute type
             let parts: Vec<_> = record_name.split("-signature-").collect();
             if parts.len() != 2 {
-                println!("    Unexpected record name format");
+                warn!(name = %record_name, "Unexpected signature record name format, skipping");
                 i += 1;
                 continue;
             }
 
             let function_name = parts[0].to_string();
             let attr_type = parts[1].to_string();
+            debug!(function = %function_name, attr_type = %attr_type, "Extracted function name and type");
 
             // Parse fields
             let mut fields = Vec::new();
@@ -308,7 +318,7 @@ fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>
                     let field_name = field_parts[0].trim().to_string();
                     let field_type = field_parts[1].trim().trim_end_matches(',').to_string();
 
-                    println!("    Field: {} -> {}", field_name, field_type);
+                    debug!(name = %field_name, wit_type = %field_type, "Found field");
                     fields.push(SignatureField {
                         name: field_name,
                         wit_type: field_type,
@@ -328,11 +338,11 @@ fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>
         i += 1;
     }
 
-    println!(
-        "Extracted {} signature structs and {} type definitions from {}",
-        signatures.len(),
-        type_names.len(),
-        file_path.display()
+    info!(
+        file = %file_path.display(),
+        signatures = signatures.len(),
+        types = type_names.len(),
+        "Finished parsing WIT file"
     );
     Ok((signatures, type_names))
 }
@@ -347,6 +357,7 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
 
     // Function full name with attribute type
     let full_function_name = format!("{}_{}_rpc", snake_function_name, signature.attr_type);
+    debug!(name = %full_function_name, "Generating function stub");
 
     // Extract parameters and return type
     let mut params = Vec::new();
@@ -357,6 +368,7 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
     for field in &signature.fields {
         let field_name_snake = to_snake_case(&field.name);
         let rust_type = wit_type_to_rust(&field.wit_type);
+        debug!(field = %field.name, wit_type = %field.wit_type, rust_type = %rust_type, "Processing field");
 
         if field.name == "target" {
             if field.wit_type == "string" {
@@ -367,14 +379,17 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
             }
         } else if field.name == "returning" {
             return_type = rust_type;
+            debug!(return_type = %return_type, "Identified return type");
         } else {
             params.push(format!("{}: {}", field_name_snake, rust_type));
             param_names.push(field_name_snake);
+            debug!(param_name = param_names.last().unwrap(), "Added parameter");
         }
     }
 
-    // First parameter is always target
+     // First parameter is always target
     let all_params = if target_param.is_empty() {
+        warn!("No 'target' parameter found in signature for {}", full_function_name);
         params.join(", ")
     } else {
         format!(
@@ -389,6 +404,7 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
 
     // For HTTP endpoints, generate commented-out implementation
     if signature.attr_type == "http" {
+        debug!("Generating commented-out stub for HTTP endpoint");
         let default_value = generate_default_value(&return_type);
 
         // Add underscore prefix to all parameters for HTTP stubs
@@ -400,6 +416,7 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
                     if parts.len() == 2 {
                         format!("_{}: {}", parts[0], parts[1])
                     } else {
+                        warn!(param = %param, "Could not parse parameter for underscore prefix");
                         format!("_{}", param)
                     }
                 })
@@ -417,6 +434,7 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
                         if parts.len() == 2 {
                             format!("_{}: {}", parts[0], parts[1])
                         } else {
+                            warn!(param = %param, "Could not parse parameter for underscore prefix");
                             format!("_{}", param)
                         }
                     })
@@ -440,15 +458,18 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
     // Format JSON parameters correctly
     let json_params = if param_names.is_empty() {
         // No parameters case
+        debug!("Generating JSON with no parameters");
         format!("json!({{\"{}\" : {{}}}})", pascal_function_name)
     } else if param_names.len() == 1 {
         // Single parameter case
+        debug!(param = %param_names[0], "Generating JSON with single parameter");
         format!(
             "json!({{\"{}\": {}}})",
             pascal_function_name, param_names[0]
         )
     } else {
         // Multiple parameters case - use tuple format
+        debug!(params = ?param_names, "Generating JSON with multiple parameters (tuple)");
         format!(
             "json!({{\"{}\": ({})}})",
             pascal_function_name,
@@ -457,6 +478,7 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
     };
 
     // Generate function with implementation using send
+    debug!("Generating standard RPC stub implementation");
     format!(
         "/// Generated stub for `{}` {} RPC call\npub async fn {}({}) -> {} {{\n    let body = {};\n    let body = serde_json::to_vec(&body).unwrap();\n    let request = Request::to(target)\n        .body(body);\n    send::<{}>(request).await\n}}",
         signature.function_name,
@@ -470,18 +492,19 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
 }
 
 // Create the caller-utils crate with a single lib.rs file
+#[instrument(skip(api_dir, base_dir))]
 fn create_caller_utils_crate(api_dir: &Path, base_dir: &Path) -> Result<()> {
     // Path to the new crate
     let caller_utils_dir = base_dir.join("target").join("caller-utils");
-    println!(
-        "Creating caller-utils crate at {}",
-        caller_utils_dir.display()
+    info!(
+        path = %caller_utils_dir.display(),
+        "Creating caller-utils crate"
     );
 
     // Create directories
     fs::create_dir_all(&caller_utils_dir)?;
     fs::create_dir_all(caller_utils_dir.join("src"))?;
-    println!("Created project directory structure");
+    debug!("Created project directory structure");
 
     // Create Cargo.toml with updated dependencies
     let cargo_toml = r#"[package]
@@ -547,13 +570,16 @@ crate-type = ["cdylib", "lib"]
             // Exclude world definition files
             if let Ok(content) = fs::read_to_string(path) {
                 if !content.contains("world ") {
+                    debug!(file = %path.display(), "Adding WIT file for parsing");
                     wit_files.push(path.to_path_buf());
+                } else {
+                    debug!(file = %path.display(), "Skipping world definition WIT file");
                 }
             }
         }
     }
 
-    println!("Found {} WIT interface files", wit_files.len());
+    info!(count = wit_files.len(), "Found WIT interface files for stub generation");
 
     // Generate content for each module and collect types
     let mut module_contents = HashMap::<String, String>::new();
@@ -563,9 +589,9 @@ crate-type = ["cdylib", "lib"]
         let interface_name = wit_file.file_stem().unwrap().to_string_lossy();
         let snake_interface_name = to_snake_case(&interface_name);
 
-        println!(
-            "Processing interface: {} -> {}",
-            interface_name, snake_interface_name
+        info!(
+            interface = %interface_name, module = %snake_interface_name, file = %wit_file.display(),
+            "Processing interface"
         );
 
         // Parse the WIT file to extract signature structs and types
@@ -575,7 +601,7 @@ crate-type = ["cdylib", "lib"]
                 interface_types.insert(interface_name.to_string(), types);
 
                 if signatures.is_empty() {
-                    println!("No signatures found in {}", wit_file.display());
+                    info!(file = %wit_file.display(), "No signature records found, skipping module generation for this file.");
                     continue;
                 }
 
@@ -590,15 +616,15 @@ crate-type = ["cdylib", "lib"]
                 }
 
                 // Store the module content
-                module_contents.insert(snake_interface_name, mod_content);
+                module_contents.insert(snake_interface_name.clone(), mod_content);
 
-                println!(
-                    "Generated module content with {} function stubs",
-                    signatures.len()
+                info!(
+                    interface = %interface_name, module = %snake_interface_name.as_str(), count = signatures.len(),
+                    "Generated module content"
                 );
             }
             Err(e) => {
-                println!("Error parsing WIT file {}: {}", wit_file.display(), e);
+                warn!(file = %wit_file.display(), error = %e, "Error parsing WIT file, skipping");
             }
         }
     }
@@ -664,12 +690,13 @@ crate-type = ["cdylib", "lib"]
 
     // Write lib.rs
     let lib_rs_path = caller_utils_dir.join("src").join("lib.rs");
-    println!("Writing lib.rs to {}", lib_rs_path.display());
+    info!("Writing generated code to {}", lib_rs_path.display());
 
     fs::write(&lib_rs_path, lib_rs)
         .with_context(|| format!("Failed to write lib.rs: {}", lib_rs_path.display()))?;
 
-    println!("Created single lib.rs file with all modules inline");
+
+    info!("Created single lib.rs file with all modules inline");
 
     // Create target/wit directory and copy all WIT files
     let target_wit_dir = caller_utils_dir.join("target").join("wit");
@@ -713,15 +740,15 @@ crate-type = ["cdylib", "lib"]
 // Update workspace Cargo.toml to include the caller-utils crate
 fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
     let workspace_cargo_toml = base_dir.join("Cargo.toml");
-    println!(
-        "Updating workspace Cargo.toml at {}",
-        workspace_cargo_toml.display()
+    info!(
+        path = %workspace_cargo_toml.display(),
+        "Updating workspace Cargo.toml"
     );
 
     if !workspace_cargo_toml.exists() {
-        println!(
-            "Workspace Cargo.toml not found at {}",
-            workspace_cargo_toml.display()
+        warn!(
+            path = %workspace_cargo_toml.display(),
+            "Workspace Cargo.toml not found, skipping update."
         );
         return Ok(());
     }
@@ -762,9 +789,9 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
                         )
                     })?;
 
-                    println!("Successfully updated workspace Cargo.toml");
+                    info!("Successfully updated workspace Cargo.toml");
                 } else {
-                    println!("caller-utils is already in workspace members");
+                    debug!("Workspace Cargo.toml already up-to-date regarding caller-utils member.");
                 }
             }
         }
@@ -774,12 +801,15 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
 }
 
 // Add caller-utils as a dependency to hyperware:process crates
+#[instrument(skip(projects))]
 pub fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
+    info!(count = projects.len(), "Adding caller-utils dependency to projects");
     for project_path in projects {
         let cargo_toml_path = project_path.join("Cargo.toml");
-        println!(
-            "Adding caller-utils dependency to {}",
-            cargo_toml_path.display()
+        debug!(
+            project = ?project_path.file_name().unwrap_or_default(),
+            path = %cargo_toml_path.display(),
+            "Processing project"
         );
 
         let content = fs::read_to_string(&cargo_toml_path).with_context(|| {
@@ -840,12 +870,15 @@ pub fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
 }
 
 // Create caller-utils crate and integrate with the workspace
+#[instrument(skip(base_dir, api_dir))]
 pub fn create_caller_utils(base_dir: &Path, api_dir: &Path) -> Result<()> {
+    info!("Starting caller-utils generation and integration process.");
     // Step 1: Create the caller-utils crate
     create_caller_utils_crate(api_dir, base_dir)?;
 
     // Step 2: Update workspace Cargo.toml
     update_workspace_cargo_toml(base_dir)?;
 
+    info!("Successfully finished caller-utils generation and integration.");
     Ok(())
 }
