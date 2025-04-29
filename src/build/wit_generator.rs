@@ -259,6 +259,16 @@ fn find_rust_files(crate_path: &Path) -> Vec<PathBuf> {
     rust_files
 }
 
+// Sanitize field names by removing leading underscores
+fn sanitize_field_name(field_name: String) -> String {
+    if let Some(stripped) = field_name.strip_prefix('_') {
+        println!("    Warning: Field '{}' starts with underscore, removing it", field_name);
+        stripped.to_string()
+    } else {
+        field_name
+    }
+}
+
 // Collect **only used** type definitions (structs and enums) from a file
 fn collect_type_definitions_from_file(
     file_path: &Path,
@@ -606,7 +616,8 @@ fn generate_signature_struct(
                 // Validate parameter name
                 match validate_name(&param_orig_name, "Parameter") {
                     Ok(_) => {
-                        let param_name = to_kebab_case(&param_orig_name);
+                        let param_name = sanitize_field_name(param_orig_name);
+                        let param_name = to_kebab_case(&param_name);
 
                         // Rust type to WIT type
                         match rust_type_to_wit(&pat_type.ty, used_types) {
