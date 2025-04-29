@@ -35,9 +35,9 @@ pub fn to_pascal_case(s: &str) -> String {
 }
 
 // Find the world name in the world WIT file, prioritizing types-prefixed worlds
-#[instrument(skip(api_dir))]
+#[instrument(level = "trace", skip_all)]
 fn find_world_names(api_dir: &Path) -> Result<Vec<String>> {
-    info!(dir = ?api_dir, "Looking for world names...");
+    debug!(dir = ?api_dir, "Looking for world names...");
     let mut world_names = Vec::new();
 
     // Look for world definition files
@@ -68,7 +68,7 @@ fn find_world_names(api_dir: &Path) -> Result<Vec<String>> {
                             // Check if this is a types-prefixed world
                             if clean_name.starts_with("types-") {
                                 world_names.push(clean_name.to_string());
-                                info!(name = %clean_name, "Found types-prefixed world");
+                                debug!(name = %clean_name, "Found types-prefixed world");
                             }
                         }
                     }
@@ -84,7 +84,7 @@ fn find_world_names(api_dir: &Path) -> Result<Vec<String>> {
 }
 
 // Convert WIT type to Rust type - IMPROVED with more Rust primitives
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip_all)]
 fn wit_type_to_rust(wit_type: &str) -> String {
     match wit_type {
         // Integer types
@@ -144,7 +144,7 @@ fn wit_type_to_rust(wit_type: &str) -> String {
 }
 
 // Generate default value for Rust type - IMPROVED with additional types
-#[instrument(level = "trace")]
+#[instrument(level = "trace", skip_all)]
 fn generate_default_value(rust_type: &str) -> String {
     match rust_type {
         // Integer types
@@ -204,9 +204,9 @@ struct SignatureStruct {
 }
 
 // Find all interface imports in the world WIT file
-#[instrument(skip(api_dir))]
+#[instrument(level = "trace", skip_all)]
 fn find_interfaces_in_world(api_dir: &Path) -> Result<Vec<String>> {
-    info!(dir = ?api_dir, "Finding interface imports in world definitions");
+    debug!(dir = ?api_dir, "Finding interface imports in world definitions");
     let mut interfaces = Vec::new();
 
     // Find world definition files
@@ -239,14 +239,14 @@ fn find_interfaces_in_world(api_dir: &Path) -> Result<Vec<String>> {
             }
         }
     }
-    info!(count = interfaces.len(), interfaces = ?interfaces, "Found interface imports");
+    debug!(count = interfaces.len(), interfaces = ?interfaces, "Found interface imports");
     Ok(interfaces)
 }
 
 // Parse WIT file to extract function signatures and type definitions
-#[instrument(skip(file_path))]
+#[instrument(level = "trace", skip_all)]
 fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>)> {
-    info!(file = %file_path.display(), "Parsing WIT file");
+    debug!(file = %file_path.display(), "Parsing WIT file");
 
     let content = fs::read_to_string(file_path)
         .with_context(|| format!("Failed to read WIT file: {}", file_path.display()))?;
@@ -338,7 +338,7 @@ fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>
         i += 1;
     }
 
-    info!(
+    debug!(
         file = %file_path.display(),
         signatures = signatures.len(),
         types = type_names.len(),
@@ -495,11 +495,11 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
 }
 
 // Create the caller-utils crate with a single lib.rs file
-#[instrument(skip(api_dir, base_dir))]
+#[instrument(level = "trace", skip_all)]
 fn create_caller_utils_crate(api_dir: &Path, base_dir: &Path) -> Result<()> {
     // Path to the new crate
     let caller_utils_dir = base_dir.join("target").join("caller-utils");
-    info!(
+    debug!(
         path = %caller_utils_dir.display(),
         "Creating caller-utils crate"
     );
@@ -535,11 +535,11 @@ crate-type = ["cdylib", "lib"]
     fs::write(caller_utils_dir.join("Cargo.toml"), cargo_toml)
         .with_context(|| "Failed to write caller-utils Cargo.toml")?;
 
-    println!("Created Cargo.toml for caller-utils");
+    debug!("Created Cargo.toml for caller-utils");
 
     // Get the world name (preferably the types- version)
     let world_names = find_world_names(api_dir)?;
-    println!("Using world names for code generation: {:?}", world_names);
+    debug!("Using world names for code generation: {:?}", world_names);
     let world_name = if world_names.len() == 0 {
         ""
     } else if world_names.len() == 1 {
@@ -582,7 +582,7 @@ crate-type = ["cdylib", "lib"]
         }
     }
 
-    info!(
+    debug!(
         count = wit_files.len(),
         "Found WIT interface files for stub generation"
     );
@@ -595,7 +595,7 @@ crate-type = ["cdylib", "lib"]
         let interface_name = wit_file.file_stem().unwrap().to_string_lossy();
         let snake_interface_name = to_snake_case(&interface_name);
 
-        info!(
+        debug!(
             interface = %interface_name, module = %snake_interface_name, file = %wit_file.display(),
             "Processing interface"
         );
@@ -607,7 +607,7 @@ crate-type = ["cdylib", "lib"]
                 interface_types.insert(interface_name.to_string(), types);
 
                 if signatures.is_empty() {
-                    info!(file = %wit_file.display(), "No signature records found, skipping module generation for this file.");
+                    debug!(file = %wit_file.display(), "No signature records found, skipping module generation for this file.");
                     continue;
                 }
 
@@ -624,7 +624,7 @@ crate-type = ["cdylib", "lib"]
                 // Store the module content
                 module_contents.insert(snake_interface_name.clone(), mod_content);
 
-                info!(
+                debug!(
                     interface = %interface_name, module = %snake_interface_name.as_str(), count = signatures.len(),
                     "Generated module content"
                 );
@@ -696,20 +696,19 @@ crate-type = ["cdylib", "lib"]
 
     // Write lib.rs
     let lib_rs_path = caller_utils_dir.join("src").join("lib.rs");
-    info!("Writing generated code to {}", lib_rs_path.display());
+    debug!("Writing generated code to {}", lib_rs_path.display());
 
     fs::write(&lib_rs_path, lib_rs)
         .with_context(|| format!("Failed to write lib.rs: {}", lib_rs_path.display()))?;
 
-    info!("Created single lib.rs file with all modules inline");
 
     // Create target/wit directory and copy all WIT files
     let target_wit_dir = caller_utils_dir.join("target").join("wit");
-    println!("Creating directory: {}", target_wit_dir.display());
+    debug!("Creating directory: {}", target_wit_dir.display());
 
     // Remove the directory if it exists to ensure clean state
     if target_wit_dir.exists() {
-        println!("Removing existing target/wit directory");
+        debug!("Removing existing target/wit directory");
         fs::remove_dir_all(&target_wit_dir)?;
     }
 
@@ -732,7 +731,7 @@ crate-type = ["cdylib", "lib"]
                     target_path.display()
                 )
             })?;
-            println!(
+            debug!(
                 "Copied {} to target/wit directory",
                 file_name.to_string_lossy()
             );
@@ -743,9 +742,10 @@ crate-type = ["cdylib", "lib"]
 }
 
 // Update workspace Cargo.toml to include the caller-utils crate
+#[instrument(level = "trace", skip_all)]
 fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
     let workspace_cargo_toml = base_dir.join("Cargo.toml");
-    info!(
+    debug!(
         path = %workspace_cargo_toml.display(),
         "Updating workspace Cargo.toml"
     );
@@ -780,7 +780,6 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
                     .any(|m| m.as_str().map_or(false, |s| s == "target/caller-utils"));
 
                 if !caller_utils_exists {
-                    println!("Adding caller-utils to workspace members");
                     members_array.push(Value::String("target/caller-utils".to_string()));
 
                     // Write back the updated TOML
@@ -794,7 +793,7 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
                         )
                     })?;
 
-                    info!("Successfully updated workspace Cargo.toml");
+                    debug!("Successfully updated workspace Cargo.toml");
                 } else {
                     debug!(
                         "Workspace Cargo.toml already up-to-date regarding caller-utils member."
@@ -808,12 +807,8 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
 }
 
 // Add caller-utils as a dependency to hyperware:process crates
-#[instrument(skip(projects))]
+#[instrument(level = "trace", skip_all)]
 pub fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
-    info!(
-        count = projects.len(),
-        "Adding caller-utils dependency to projects"
-    );
     for project_path in projects {
         let cargo_toml_path = project_path.join("Cargo.toml");
         debug!(
@@ -868,9 +863,9 @@ pub fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
                         )
                     })?;
 
-                    println!("Successfully added caller-utils dependency");
+                    debug!(project = ?project_path.file_name().unwrap_or_default(), "Successfully added caller-utils dependency");
                 } else {
-                    println!("caller-utils dependency already exists");
+                    debug!(project = ?project_path.file_name().unwrap_or_default(), "caller-utils dependency already exists");
                 }
             }
         }
@@ -880,15 +875,14 @@ pub fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
 }
 
 // Create caller-utils crate and integrate with the workspace
-#[instrument(skip(base_dir, api_dir))]
+#[instrument(level = "trace", skip_all)]
 pub fn create_caller_utils(base_dir: &Path, api_dir: &Path) -> Result<()> {
-    info!("Starting caller-utils generation and integration process.");
     // Step 1: Create the caller-utils crate
     create_caller_utils_crate(api_dir, base_dir)?;
 
     // Step 2: Update workspace Cargo.toml
     update_workspace_cargo_toml(base_dir)?;
 
-    info!("Successfully finished caller-utils generation and integration.");
+    info!("Successfully created caller-utils and copied the imports");
     Ok(())
 }
