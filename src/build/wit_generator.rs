@@ -327,7 +327,9 @@ fn collect_type_definitions_from_file(
                                             Ok(_) => {
                                                 let field_name = to_kebab_case(&field_orig_name);
                                                 if field_name.is_empty() {
-                                                    warn!("Skipping field with empty name conversion");
+                                                    warn!(
+                                                        "Skipping field with empty name conversion"
+                                                    );
                                                     continue;
                                                 }
 
@@ -339,10 +341,7 @@ fn collect_type_definitions_from_file(
                                                 ) {
                                                     Ok(ty) => ty,
                                                     Err(e) => {
-                                                        warn!(
-                                                            "Error converting field type: {}",
-                                                            e
-                                                        );
+                                                        warn!("Error converting field type: {}", e);
                                                         // Propagate error if field type conversion fails
                                                         return Err(e);
                                                     }
@@ -407,7 +406,10 @@ fn collect_type_definitions_from_file(
 
                         // --- Check if this type is used ---
                         if !used_types.contains(&name) {
-                            warn!("  Skipping type not present in any function signature: {} -> {}", orig_name, name); // Optional debug log
+                            warn!(
+                                "  Skipping type not present in any function signature: {} -> {}",
+                                orig_name, name
+                            ); // Optional debug log
                             continue; // Skip this enum if not in the used set
                         }
                         // --- End Check ---
@@ -547,7 +549,10 @@ fn find_rust_projects(base_dir: &Path) -> Vec<PathBuf> {
             .and_then(|p| p.get("metadata"))
             .and_then(|m| m.get("component"))
         else {
-            warn!("  No package.metadata.component metadata found in {}", cargo_toml.display()); // Added path context
+            warn!(
+                "  No package.metadata.component metadata found in {}",
+                cargo_toml.display()
+            ); // Added path context
             continue;
         };
         let Some(package) = metadata.get("package") else {
@@ -1138,7 +1143,6 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
 
     let mut wit_worlds = HashSet::new();
     for project_path in &projects {
-
         match process_rust_project(project_path, api_dir) {
             Ok(Some((interface, wit_world))) => {
                 new_imports.push(format!("    import {interface};"));
@@ -1148,7 +1152,10 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
 
                 wit_worlds.insert(wit_world);
             }
-            Ok(None) => warn!("No import statement generated for project: {}", project_path.display()), // Add path context
+            Ok(None) => warn!(
+                "No import statement generated for project: {}",
+                project_path.display()
+            ), // Add path context
             Err(e) => warn!("Error processing project {}: {}", project_path.display(), e), // Add path context
         }
     }

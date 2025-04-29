@@ -701,7 +701,6 @@ crate-type = ["cdylib", "lib"]
     fs::write(&lib_rs_path, lib_rs)
         .with_context(|| format!("Failed to write lib.rs: {}", lib_rs_path.display()))?;
 
-
     // Create target/wit directory and copy all WIT files
     let target_wit_dir = caller_utils_dir.join("target").join("wit");
     debug!("Creating directory: {}", target_wit_dir.display());
