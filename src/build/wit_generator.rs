@@ -75,7 +75,7 @@ fn remove_state_suffix(name: &str) -> String {
 }
 
 // Extract wit_world from the #[hyperprocess] attribute using the format in the debug representation
-#[instrument(skip(attrs))]
+#[instrument(level = "trace", skip_all)]
 fn extract_wit_world(attrs: &[Attribute]) -> Result<String> {
     for attr in attrs {
         if attr.path().is_ident("hyperprocess") {
@@ -106,7 +106,7 @@ fn extract_wit_world(attrs: &[Attribute]) -> Result<String> {
 }
 
 // Convert Rust type to WIT type, including downstream types
-#[instrument(level = "debug", skip(ty, used_types))]
+#[instrument(level = "trace", skip_all)]
 fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<String> {
     match ty {
         Type::Path(type_path) => {
@@ -239,7 +239,7 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
 }
 
 // Find all Rust files in a crate directory
-#[instrument]
+#[instrument(level = "trace", skip_all)]
 fn find_rust_files(crate_path: &Path) -> Vec<PathBuf> {
     let mut rust_files = Vec::new();
     let src_dir = crate_path.join("src");
@@ -277,13 +277,13 @@ fn sanitize_field_name(field_name: String) -> String {
 }
 
 // Collect **only used** type definitions (structs and enums) from a file
-#[instrument(skip(used_types))]
+#[instrument(level = "trace", skip_all)]
 fn collect_type_definitions_from_file(
     file_path: &Path,
     used_types: &HashSet<String>, // Accept the set of used types
 ) -> Result<HashMap<String, String>> {
     debug!(
-        "Collecting used type definitions from file: {}", // Updated message
+        "Collecting used type definitions from file: {}",
         file_path.display()
     );
 
@@ -304,7 +304,7 @@ fn collect_type_definitions_from_file(
                 // Skip trying to validate if name contains "__" as these are likely internal types
                 if orig_name.contains("__") {
                     // This skip can remain, as internal types are unlikely to be in `used_types` anyway
-                    warn!("  Skipping likely internal struct: {}", orig_name);
+                    warn!("Skipping likely internal struct: {}", orig_name);
                     continue;
                 }
 
@@ -320,7 +320,7 @@ fn collect_type_definitions_from_file(
                         }
                         // --- End Check ---
 
-                        debug!("  Found used struct: {} -> {}", orig_name, name); // Updated message
+                        debug!("  Found used struct: {} -> {}", orig_name, name);
 
                         // Proceed with field processing only if the struct is used
                         let fields: Vec<String> = match &item_struct.fields {
@@ -340,7 +340,7 @@ fn collect_type_definitions_from_file(
                                             Ok(_) => {
                                                 let field_name = to_kebab_case(&field_orig_name);
                                                 if field_name.is_empty() {
-                                                    warn!("    Skipping field with empty name conversion");
+                                                    warn!("Skipping field with empty name conversion");
                                                     continue;
                                                 }
 
@@ -353,7 +353,7 @@ fn collect_type_definitions_from_file(
                                                     Ok(ty) => ty,
                                                     Err(e) => {
                                                         warn!(
-                                                            "    Error converting field type: {}",
+                                                            "Error converting field type: {}",
                                                             e
                                                         );
                                                         // Propagate error if field type conversion fails
@@ -420,12 +420,12 @@ fn collect_type_definitions_from_file(
 
                         // --- Check if this type is used ---
                         if !used_types.contains(&name) {
-                            warn!("  Skipping unused enum: {} -> {}", orig_name, name); // Optional debug log
+                            warn!("  Skipping type not present in any function signature: {} -> {}", orig_name, name); // Optional debug log
                             continue; // Skip this enum if not in the used set
                         }
                         // --- End Check ---
 
-                        debug!("  Found used enum: {} -> {}", orig_name, name); // Updated message
+                        debug!("  Found used enum: {} -> {}", orig_name, name);
 
                         // Proceed with variant processing only if the enum is used
                         let mut variants = Vec::new();
@@ -521,12 +521,12 @@ fn collect_type_definitions_from_file(
     debug!(
         "Collected {} used type definitions from this file",
         type_defs.len()
-    ); // Updated message
+    );
     Ok(type_defs)
 }
 
 // Find all relevant Rust projects
-#[instrument]
+#[instrument(level = "trace", skip_all)]
 fn find_rust_projects(base_dir: &Path) -> Vec<PathBuf> {
     let mut projects = Vec::new();
     debug!("Scanning for Rust projects in {}", base_dir.display());
@@ -560,7 +560,7 @@ fn find_rust_projects(base_dir: &Path) -> Vec<PathBuf> {
             .and_then(|p| p.get("metadata"))
             .and_then(|m| m.get("component"))
         else {
-            warn!("  No package.metadata.component metadata found");
+            warn!("  No package.metadata.component metadata found in {}", cargo_toml.display()); // Added path context
             continue;
         };
         let Some(package) = metadata.get("package") else {
@@ -574,7 +574,7 @@ fn find_rust_projects(base_dir: &Path) -> Vec<PathBuf> {
             package_str
         );
         if package_str == "hyperware:process" {
-            info!("  Adding project: {}", path.display());
+            debug!("  Adding project: {}", path.display()); // INFO -> DEBUG
             projects.push(path.to_path_buf());
         }
     }
@@ -584,7 +584,7 @@ fn find_rust_projects(base_dir: &Path) -> Vec<PathBuf> {
 }
 
 // Helper function to generate signature struct for specific attribute type
-#[instrument(skip(used_types))]
+#[instrument(level = "trace", skip_all)]
 fn generate_signature_struct(
     kebab_name: &str,
     attr_type: &str,
@@ -694,7 +694,7 @@ impl AsTypePath for syn::Type {
 }
 
 // Process a single Rust project and generate WIT files
-#[instrument(skip_all)]
+#[instrument(level = "trace", skip_all)]
 fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(String, String)>> {
     info!("Processing project: {}", project_path.display());
 
@@ -773,9 +773,9 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     // Convert to kebab-case for file name and interface name
                     kebab_interface_name = Some(to_kebab_case(&base_name));
 
-                    info!("Interface name: {:?}", interface_name);
-                    info!("Base name: {}", base_name);
-                    info!("Kebab interface name: {:?}", kebab_interface_name);
+                    debug!("Interface name: {:?}", interface_name);
+                    debug!("Base name: {}", base_name);
+                    debug!("Kebab interface name: {:?}", kebab_interface_name);
 
                     // Save the impl item for later processing
                     impl_item_with_hyperprocess = Some(impl_item.clone());
@@ -823,7 +823,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                         Ok(_) => {
                             // Convert function name to kebab-case
                             let func_kebab_name = to_kebab_case(&method_name); // Use different var name
-                            info!(
+                            debug!(
                                 "    Processing method: {} -> {}",
                                 method_name, func_kebab_name
                             );
@@ -877,7 +877,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                         }
                     }
                 } else {
-                    warn!("    Skipping method without relevant attributes");
+                    warn!("    Method {} does not have the [remote], [local], or [http], and will not be included in the WIT file", method_name);
                 }
             }
         }
@@ -961,15 +961,15 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
             // Write the interface file with kebab-case name
             let interface_file = api_dir.join(format!("{}.wit", kebab_name));
-            info!("Writing WIT file to {}", interface_file.display());
+            debug!("Writing WIT file to {}", interface_file.display());
 
             fs::write(&interface_file, &final_content)
                 .with_context(|| format!("Failed to write {}", interface_file.display()))?;
 
-            info!("Successfully wrote WIT file");
+            debug!("Successfully wrote WIT file");
         }
     } else {
-        warn!("No valid hyperprocess interface found in lib.rs"); // More specific message
+        warn!("No valid hyperprocess interface found in lib.rs");
     }
 
     // Return statement remains the same logic
@@ -984,13 +984,14 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         Ok(None)
     }
 }
-#[instrument(skip(new_imports, wit_worlds, updated_world))]
+#[instrument(level = "trace", skip_all)]
 fn rewrite_wit(
     api_dir: &Path,
     new_imports: &Vec<String>,
     wit_worlds: &mut HashSet<String>,
     updated_world: &mut bool,
 ) -> Result<()> {
+    debug!("Rewriting WIT world files in {}", api_dir.display());
     // handle existing api files
     for entry in WalkDir::new(api_dir)
         .max_depth(1)
@@ -1045,13 +1046,13 @@ fn rewrite_wit(
                     &mut include_lines,
                 )?;
 
-                info!("Writing updated world definition to {}", path.display());
+                debug!("Writing updated world definition to {}", path.display());
                 // Write the updated world file
                 fs::write(path, world_content).with_context(|| {
                     format!("Failed to write updated world file: {}", path.display())
                 })?;
 
-                info!("Successfully updated world definition");
+                debug!("Successfully updated world definition"); // INFO -> DEBUG
                 *updated_world = true;
             }
         }
@@ -1065,13 +1066,13 @@ fn rewrite_wit(
                 generate_wit_file(&wit_world, new_imports, &Vec::new(), &mut HashSet::new())?;
 
             let path = api_dir.join(format!("{wit_world}.wit"));
-            info!("Writing updated world definition to {}", path.display());
+            debug!("Writing updated world definition to {}", path.display());
             // Write the updated world file
             fs::write(&path, world_content).with_context(|| {
                 format!("Failed to write updated world file: {}", path.display())
             })?;
 
-            info!("Successfully created new world definition for {wit_world}");
+            debug!("Successfully created new world definition for {wit_world}");
         }
         *updated_world = true;
     }
@@ -1130,8 +1131,10 @@ fn generate_wit_file(
 }
 
 // Generate WIT files from Rust code
-#[instrument(skip(base_dir, api_dir))]
+#[instrument(level = "trace", skip_all)]
 pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBuf>, Vec<String>)> {
+    // Keep INFO for start
+    info!("Generating WIT files...");
     fs::create_dir_all(&api_dir)?;
 
     // Find all relevant Rust projects
@@ -1149,7 +1152,6 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
 
     let mut wit_worlds = HashSet::new();
     for project_path in &projects {
-        info!("Processing project: {}", project_path.display());
 
         match process_rust_project(project_path, api_dir) {
             Ok(Some((interface, wit_world))) => {
@@ -1160,8 +1162,8 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
 
                 wit_worlds.insert(wit_world);
             }
-            Ok(None) => warn!("No import statement generated"),
-            Err(e) => warn!("Error processing project: {}", e),
+            Ok(None) => warn!("No import statement generated for project: {}", project_path.display()), // Add path context
+            Err(e) => warn!("Error processing project {}: {}", project_path.display(), e), // Add path context
         }
     }
 
@@ -1209,7 +1211,7 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
         );
 
         let world_file = api_dir.join(format!("{}.wit", default_world));
-        info!(
+        debug!(
             "Writing default world definition to {}",
             world_file.display()
         );
@@ -1221,7 +1223,7 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
             )
         })?;
 
-        info!("Successfully created default world definition");
+        debug!("Successfully created default world definition");
     }
 
     info!("WIT files generated successfully in the 'api' directory.");
