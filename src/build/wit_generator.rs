@@ -265,10 +265,7 @@ fn find_rust_files(crate_path: &Path) -> Vec<PathBuf> {
 // Sanitize field names by removing leading underscores
 fn sanitize_field_name(field_name: String) -> String {
     if let Some(stripped) = field_name.strip_prefix('_') {
-        println!(
-            "    Warning: Field '{}' starts with underscore, removing it",
-            field_name
-        );
+        println!("    Warning: Field '{}' starts with underscore, removing it", field_name);
         stripped.to_string()
     } else {
         field_name
