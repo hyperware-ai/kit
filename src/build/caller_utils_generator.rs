@@ -387,9 +387,12 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
         }
     }
 
-     // First parameter is always target
+    // First parameter is always target
     let all_params = if target_param.is_empty() {
-        warn!("No 'target' parameter found in signature for {}", full_function_name);
+        warn!(
+            "No 'target' parameter found in signature for {}",
+            full_function_name
+        );
         params.join(", ")
     } else {
         format!(
@@ -579,7 +582,10 @@ crate-type = ["cdylib", "lib"]
         }
     }
 
-    info!(count = wit_files.len(), "Found WIT interface files for stub generation");
+    info!(
+        count = wit_files.len(),
+        "Found WIT interface files for stub generation"
+    );
 
     // Generate content for each module and collect types
     let mut module_contents = HashMap::<String, String>::new();
@@ -695,7 +701,6 @@ crate-type = ["cdylib", "lib"]
     fs::write(&lib_rs_path, lib_rs)
         .with_context(|| format!("Failed to write lib.rs: {}", lib_rs_path.display()))?;
 
-
     info!("Created single lib.rs file with all modules inline");
 
     // Create target/wit directory and copy all WIT files
@@ -791,7 +796,9 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
 
                     info!("Successfully updated workspace Cargo.toml");
                 } else {
-                    debug!("Workspace Cargo.toml already up-to-date regarding caller-utils member.");
+                    debug!(
+                        "Workspace Cargo.toml already up-to-date regarding caller-utils member."
+                    );
                 }
             }
         }
@@ -803,7 +810,10 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
 // Add caller-utils as a dependency to hyperware:process crates
 #[instrument(skip(projects))]
 pub fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
-    info!(count = projects.len(), "Adding caller-utils dependency to projects");
+    info!(
+        count = projects.len(),
+        "Adding caller-utils dependency to projects"
+    );
     for project_path in projects {
         let cargo_toml_path = project_path.join("Cargo.toml");
         debug!(

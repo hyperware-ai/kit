@@ -8,8 +8,8 @@ use color_eyre::{
 };
 use syn::{self, Attribute, ImplItem, Item, Type};
 use toml::Value;
-use walkdir::WalkDir;
 use tracing::{debug, info, instrument, warn};
+use walkdir::WalkDir;
 
 // Helper functions for naming conventions
 fn to_kebab_case(s: &str) -> String {
@@ -73,7 +73,6 @@ fn remove_state_suffix(name: &str) -> String {
     }
     name.to_string()
 }
-
 
 // Extract wit_world from the #[hyperprocess] attribute using the format in the debug representation
 #[instrument(skip(attrs))]
@@ -409,7 +408,7 @@ fn collect_type_definitions_from_file(
                         // --- Check if this type is used ---
                         if !used_types.contains(&name) {
                             warn!("  Skipping unused enum: {} -> {}", orig_name, name); // Optional debug log
-                                continue; // Skip this enum if not in the used set
+                            continue; // Skip this enum if not in the used set
                         }
                         // --- End Check ---
 
@@ -825,10 +824,9 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                                     &mut used_types, // Pass the main set
                                 ) {
                                     Ok(remote_struct) => signature_structs.push(remote_struct),
-                                    Err(e) => warn!(
-                                        "    Error generating remote signature struct: {}",
-                                        e
-                                    ),
+                                    Err(e) => {
+                                        warn!("    Error generating remote signature struct: {}", e)
+                                    }
                                 }
                             }
 
@@ -840,10 +838,9 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                                     &mut used_types, // Pass the main set
                                 ) {
                                     Ok(local_struct) => signature_structs.push(local_struct),
-                                    Err(e) => warn!(
-                                        "    Error generating local signature struct: {}",
-                                        e
-                                    ),
+                                    Err(e) => {
+                                        warn!("    Error generating local signature struct: {}", e)
+                                    }
                                 }
                             }
 
@@ -855,10 +852,9 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                                     &mut used_types, // Pass the main set
                                 ) {
                                     Ok(http_struct) => signature_structs.push(http_struct),
-                                    Err(e) => warn!(
-                                        "    Error generating HTTP signature struct: {}",
-                                        e
-                                    ),
+                                    Err(e) => {
+                                        warn!("    Error generating HTTP signature struct: {}", e)
+                                    }
                                 }
                             }
                         }
