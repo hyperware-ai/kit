@@ -65,6 +65,18 @@ fn validate_name(name: &str, kind: &str) -> Result<()> {
     Ok(())
 }
 
+// Check if a field name starts with an underscore, and if so, strip it and print a warning.
+fn check_and_strip_leading_underscore(field_name: String) -> String {
+    if let Some(stripped) = field_name.strip_prefix('_') {
+        warn!(field_name = %field_name,
+         "field_name is prefixed with an underscore, which is not allowed in WIT. Function signatures should not include unused parameters."
+        );
+        stripped.to_string()
+    } else {
+        field_name
+    }
+}
+
 // Remove "State" suffix from a name
 fn remove_state_suffix(name: &str) -> String {
     if name.ends_with("State") {
@@ -392,7 +404,7 @@ fn collect_type_definitions_from_file(
 
                 // Skip trying to validate if name contains "__"
                 if orig_name.contains("__") {
-                    warn!(name = %orig_name, "Skipping likely internal enum");
+                    debug!(name = %orig_name, "Skipping likely internal enum");
                     continue;
                 }
 
@@ -403,7 +415,7 @@ fn collect_type_definitions_from_file(
 
                         // --- Check if this type is used ---
                         if !used_types.contains(&name) {
-                            warn!(original_name = %orig_name, kebab_name = %name, "Skipping type not present in any function signature");
+                            debug!(original_name = %orig_name, kebab_name = %name, "Skipping type not present in any function signature");
                             continue; // Skip this enum if not in the used set
                         }
                         // --- End Check ---
@@ -593,7 +605,8 @@ fn generate_signature_struct(
                 // Validate parameter name
                 match validate_name(&param_orig_name, "Parameter") {
                     Ok(_) => {
-                        let param_name = to_kebab_case(&param_orig_name);
+                        let param_name = check_and_strip_leading_underscore(param_orig_name);
+                        let param_name = to_kebab_case(&param_name);
 
                         // Rust type to WIT type
                         match rust_type_to_wit(&pat_type.ty, used_types) {
