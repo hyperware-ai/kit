@@ -788,14 +788,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     .attrs
                     .iter()
                     .any(|attr| attr.path().is_ident("local"));
-                let has_http = method
-                    .attrs
-                    .iter()
-                    .any(|attr| attr.path().is_ident("http"));
-                let has_init = method
-                    .attrs
-                    .iter()
-                    .any(|attr| attr.path().is_ident("init"));
+                let has_http = method.attrs.iter().any(|attr| attr.path().is_ident("http"));
+                let has_init = method.attrs.iter().any(|attr| attr.path().is_ident("init"));
 
                 if has_remote || has_local || has_http || has_init {
                     debug!(remote = %has_remote, local = %has_local, http = %has_http, init = %has_init, "Method attributes");
@@ -805,7 +799,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                         Ok(_) => {
                             // Convert function name to kebab-case
                             let func_kebab_name = to_kebab_case(&method_name); // Use different var name
-                            
+
                             debug!(original_name = %method_name, kebab_name = %func_kebab_name, "Processing method");
 
                             if has_init {
@@ -1132,10 +1126,10 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
             }
             Ok(None) => {
                 warn!(project_path = %project_path.display(), "No import statement generated for project");
-            },
+            }
             Err(e) => {
                 warn!(project_path = %project_path.display(), error = %e, "Error processing project");
-            },
+            }
         }
     }
 
