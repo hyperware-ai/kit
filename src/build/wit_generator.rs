@@ -266,9 +266,9 @@ fn find_rust_files(crate_path: &Path) -> Vec<PathBuf> {
 fn check_and_strip_leading_underscore(field_name: String) -> String {
     if let Some(stripped) = field_name.strip_prefix('_') {
         warn!(field_name = %field_name,
-             "This field prefixed with an underscore, which is not allowed in WIT.
-              Function signatures should not include unused parameters."
-            );
+         "This field prefixed with an underscore, which is not allowed in WIT.
+          Function signatures should not include unused parameters."
+        );
         stripped.to_string()
     } else {
         field_name
