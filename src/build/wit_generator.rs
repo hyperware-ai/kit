@@ -236,7 +236,6 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                                     (ok, err) => format!("result<{}, {}>", ok, err), // Explicit: result<T, E>
                                 };
                                 Ok(result_string)
-
                             } else {
                                 Err(eyre!("Failed to parse Result first generic argument"))
                             }
