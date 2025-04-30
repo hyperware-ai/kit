@@ -815,12 +815,19 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     .attrs
                     .iter()
                     .any(|attr| attr.path().is_ident("local"));
-                let has_http = method.attrs.iter().any(|attr| attr.path().is_ident("http"));
+                let has_http = method
+                    .attrs
+                    .iter()
+                    .any(|attr| attr.path().is_ident("http"));
+                let has_init = method
+                    .attrs
+                    .iter()
+                    .any(|attr| attr.path().is_ident("init"));
 
-                if has_remote || has_local || has_http {
+                if has_remote || has_local || has_http || has_init {
                     debug!(
-                        "    Has relevant attributes: remote={}, local={}, http={}",
-                        has_remote, has_local, has_http
+                        "    Has relevant attributes: remote={}, local={}, http={}, init={}",
+                        has_remote, has_local, has_http, has_init
                     );
 
                     // Validate function name
@@ -828,12 +835,19 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                         Ok(_) => {
                             // Convert function name to kebab-case
                             let func_kebab_name = to_kebab_case(&method_name); // Use different var name
+                            
                             debug!(
                                 "    Processing method: {} -> {}",
                                 method_name, func_kebab_name
                             );
 
-                            // Generate a signature struct for each attribute type
+                            if has_init {
+                                debug!(
+                                    "    Found initialization function: {}",
+                                    method_name
+                                );
+                                continue;
+                            }
                             // This will populate `used_types`
                             if has_remote {
                                 match generate_signature_struct(
@@ -882,7 +896,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                         }
                     }
                 } else {
-                    warn!("    Method {} does not have the [remote], [local], or [http], and will not be included in the WIT file", method_name);
+                    warn!("   Method {} does not have the [remote], [local], [http] or [init] attribute, it should not be in the Impl block", method_name);
                 }
             }
         }
