@@ -671,8 +671,6 @@ fn get_most_recent_modified_time(
         return Err(eyre!("Didn't find required dirs: {must_exist_dirs:?}"));
     }
 
-    debug!("get_most_recent_modified_time: most_recent: {most_recent:?}, most_recent_excluded: {most_recent_excluded:?}");
-
     Ok((most_recent, most_recent_excluded))
 }
 
