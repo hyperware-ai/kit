@@ -84,7 +84,6 @@ fn find_world_names(api_dir: &Path) -> Result<Vec<String>> {
 }
 
 // Convert WIT type to Rust type - IMPROVED with more Rust primitives
-#[instrument(level = "trace", skip_all)]
 fn wit_type_to_rust(wit_type: &str) -> String {
     match wit_type {
         // Integer types
@@ -144,7 +143,6 @@ fn wit_type_to_rust(wit_type: &str) -> String {
 }
 
 // Generate default value for Rust type - IMPROVED with additional types
-#[instrument(level = "trace", skip_all)]
 fn generate_default_value(rust_type: &str) -> String {
     match rust_type {
         // Integer types
