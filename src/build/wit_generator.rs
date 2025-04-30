@@ -11,7 +11,6 @@ use toml::Value;
 use tracing::{debug, info, instrument, warn};
 use walkdir::WalkDir;
 
-
 // Helper functions for naming conventions
 fn to_kebab_case(s: &str) -> String {
     // First, handle the case where the input has underscores
@@ -119,13 +118,25 @@ fn extract_wit_world(attrs: &[Attribute]) -> Result<String> {
 }
 // Helper function to check if a WIT type name is a primitive or known built-in
 fn is_wit_primitive_or_builtin(type_name: &str) -> bool {
-    matches!(type_name,
-        "s8" | "u8" | "s16" | "u16" | "s32" | "u32" | "s64" | "u64" |
-        "f32" | "f64" | "bool" | "char" | "string" | "address"
+    matches!(
+        type_name,
+        "s8" | "u8"
+            | "s16"
+            | "u16"
+            | "s32"
+            | "u32"
+            | "s64"
+            | "u64"
+            | "f32"
+            | "f64"
+            | "bool"
+            | "char"
+            | "string"
+            | "address"
     ) || type_name.starts_with("list<")
-      || type_name.starts_with("option<")
-      || type_name.starts_with("result<")
-      || type_name.starts_with("tuple<")
+        || type_name.starts_with("option<")
+        || type_name.starts_with("result<")
+        || type_name.starts_with("tuple<")
 }
 
 // Convert Rust type to WIT type, including downstream types
@@ -185,16 +196,21 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                     if let syn::PathArguments::AngleBracketed(args) =
                         &type_path.path.segments.last().unwrap().arguments
                     {
-                        if args.args.len() >= 1 { // Allow one or two args for Result
+                        if args.args.len() >= 1 {
+                            // Allow one or two args for Result
                             if let Some(syn::GenericArgument::Type(ok_ty)) = args.args.first() {
                                 let ok_type_str = rust_type_to_wit(ok_ty, used_types)?;
 
                                 let err_type_str = if args.args.len() >= 2 {
-                                    if let Some(syn::GenericArgument::Type(err_ty)) = args.args.get(1) {
+                                    if let Some(syn::GenericArgument::Type(err_ty)) =
+                                        args.args.get(1)
+                                    {
                                         rust_type_to_wit(err_ty, used_types)?
                                     } else {
                                         // Should ideally not happen if len >= 2, but handle defensively
-                                        return Err(eyre!("Failed to parse Result second generic argument"));
+                                        return Err(eyre!(
+                                            "Failed to parse Result second generic argument"
+                                        ));
                                     }
                                 } else {
                                     // Only one type arg provided (e.g., Rust Result<T>)
@@ -203,18 +219,25 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                                 };
 
                                 // --- BEGIN Idiomatic Result Formatting ---
-                                let final_ok = if ok_type_str == "tuple<>" { "_" } else { &ok_type_str };
-                                let final_err = if err_type_str == "tuple<>" { "_" } else { &err_type_str };
+                                let final_ok = if ok_type_str == "tuple<>" {
+                                    "_"
+                                } else {
+                                    &ok_type_str
+                                };
+                                let final_err = if err_type_str == "tuple<>" {
+                                    "_"
+                                } else {
+                                    &err_type_str
+                                };
 
                                 let result_string = match (final_ok, final_err) {
-                                    ("_", "_") => "result".to_string(), // Shorthand: result
+                                    ("_", "_") => "result".to_string(),          // Shorthand: result
                                     (ok, "_") => format!("result<{}>", ok), // Shorthand: result<T>
                                     ("_", err) => format!("result<_, {}>", err), // Explicit: result<_, E>
                                     (ok, err) => format!("result<{}, {}>", ok, err), // Explicit: result<T, E>
                                 };
                                 Ok(result_string)
                                 // --- END Idiomatic Result Formatting ---
-
                             } else {
                                 Err(eyre!("Failed to parse Result first generic argument"))
                             }
@@ -312,7 +335,8 @@ fn find_rust_files(crate_path: &Path) -> Vec<PathBuf> {
 fn collect_type_definitions_from_file(
     file_path: &Path,
     used_types: &mut HashSet<String>, // Change to mutable, we will add to it
-) -> Result<HashMap<String, String>> { // Keep the return type, we still build the definitions here
+) -> Result<HashMap<String, String>> {
+    // Keep the return type, we still build the definitions here
     debug!(
         file_path = %file_path.display(),
         "Collecting used type definitions from file"
@@ -356,7 +380,8 @@ fn collect_type_definitions_from_file(
 
                         debug!(original_name = %orig_name, kebab_name = %name, "Found used struct");
 
-                        let fields: Result<Vec<String>> = match &item_struct.fields { // Change to collect Result
+                        let fields: Result<Vec<String>> = match &item_struct.fields {
+                            // Change to collect Result
                             syn::Fields::Named(fields) => {
                                 // Note: The `rust_type_to_wit` calls here still use a *local* `used_types`
                                 // set for *recursive* type discovery *within this struct's definition*.
@@ -381,8 +406,7 @@ fn collect_type_definitions_from_file(
 
                                                 // Pass the main `used_types` set here
                                                 let field_type = match rust_type_to_wit(
-                                                    &f.ty,
-                                                    used_types, // Pass the main set
+                                                    &f.ty, used_types, // Pass the main set
                                                 ) {
                                                     Ok(ty) => ty,
                                                     Err(e) => {
@@ -417,10 +441,14 @@ fn collect_type_definitions_from_file(
                                 if !fields_vec.is_empty() {
                                     type_defs.insert(
                                         name.clone(),
-                                        format!("    record {} {{\n{}\n    }}", name, fields_vec.join(",\n")),
+                                        format!(
+                                            "    record {} {{\n{}\n    }}",
+                                            name,
+                                            fields_vec.join(",\n")
+                                        ),
                                     );
                                 } else {
-                                     warn!(name = %name, "Skipping used struct with no convertible fields");
+                                    warn!(name = %name, "Skipping used struct with no convertible fields");
                                 }
                             }
                             Err(e) => return Err(e), // Propagate error from field processing
@@ -462,7 +490,7 @@ fn collect_type_definitions_from_file(
                             let variant_orig_name = v.ident.to_string();
                             match validate_name(&variant_orig_name, "Enum variant") {
                                 Ok(_) => {
-                                     match &v.fields {
+                                    match &v.fields {
                                         syn::Fields::Unnamed(fields)
                                             if fields.unnamed.len() == 1 =>
                                         {
@@ -472,13 +500,17 @@ fn collect_type_definitions_from_file(
                                                 used_types, // Pass main set
                                             ) {
                                                 Ok(ty) => {
-                                                    let variant_name = to_kebab_case(&variant_orig_name);
+                                                    let variant_name =
+                                                        to_kebab_case(&variant_orig_name);
                                                     debug!(original_name = %variant_orig_name, kebab_name = %variant_name, ty_str = %ty, "Found enum variant with type");
-                                                    variants.push(format!("        {}({})", variant_name, ty));
+                                                    variants.push(format!(
+                                                        "        {}({})",
+                                                        variant_name, ty
+                                                    ));
                                                 }
                                                 Err(e) => {
                                                     warn!(enum_name = %name, variant_name = %variant_orig_name, error = %e, "Error converting variant type");
-                                                     // Propagate error immediately
+                                                    // Propagate error immediately
                                                     return Err(e.wrap_err(format!("Failed to convert variant '{}' in enum '{}'", variant_orig_name, name)));
                                                 }
                                             }
@@ -489,7 +521,7 @@ fn collect_type_definitions_from_file(
                                             variants.push(format!("        {}", variant_name));
                                         }
                                         _ => {
-                                             warn!(enum_name = %name, variant_name = %variant_orig_name, "Skipping complex variant in used enum");
+                                            warn!(enum_name = %name, variant_name = %variant_orig_name, "Skipping complex variant in used enum");
                                             skip_enum = true;
                                             break;
                                         }
@@ -505,9 +537,13 @@ fn collect_type_definitions_from_file(
 
                         // Add the enum definition only if it wasn't skipped and has variants
                         if !skip_enum && !variants.is_empty() {
-                             type_defs.insert(
+                            type_defs.insert(
                                 name.clone(),
-                                format!("    variant {} {{\n{}\n    }}", name, variants.join(",\n")),
+                                format!(
+                                    "    variant {} {{\n{}\n    }}",
+                                    name,
+                                    variants.join(",\n")
+                                ),
                             );
                         } else {
                             warn!(name = %name, "Skipping used enum due to complex/invalid variants or no variants");
@@ -664,7 +700,8 @@ fn generate_signature_struct(
                 return Err(e);
             }
         },
-        syn::ReturnType::Default => { // This corresponds to -> () or no return type
+        syn::ReturnType::Default => {
+            // This corresponds to -> () or no return type
             // Use tuple<> for functions returning nothing (Rust unit type)
             struct_fields.push("        returning: tuple<>".to_string());
         }
@@ -889,7 +926,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     for file_path in &rust_files {
         // Pass the populated used_types set to the collector, making it mutable
         // It will ADD nested types to `used_types` if they are custom.
-        match collect_type_definitions_from_file(file_path, &mut used_types) { // Pass as mutable
+        match collect_type_definitions_from_file(file_path, &mut used_types) {
+            // Pass as mutable
             Ok(file_type_defs) => {
                 for (name, def) in file_type_defs {
                     // Insert definition if successfully generated. We might insert the same
@@ -901,9 +939,12 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             Err(e) => {
                 // Decide how to handle errors from collection: warn and continue, or bail?
                 // Bailing might be safer to ensure correctness.
-                 warn!(file_path = %file_path.display(), error = %e, "Error collecting type definitions from file, WIT may be incomplete.");
-                 // For stricter checking, you might uncomment the next line:
-                 return Err(e.wrap_err(format!("Failed to collect type definitions from {}", file_path.display())));
+                warn!(file_path = %file_path.display(), error = %e, "Error collecting type definitions from file, WIT may be incomplete.");
+                // For stricter checking, you might uncomment the next line:
+                return Err(e.wrap_err(format!(
+                    "Failed to collect type definitions from {}",
+                    file_path.display()
+                )));
             }
         }
     }
@@ -916,11 +957,13 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     let mut undefined_types = Vec::new();
     for used_type_name in &used_types {
         // Check if the used type is a primitive/builtin OR if we found its definition locally
-        if !is_wit_primitive_or_builtin(used_type_name) && !all_type_defs.contains_key(used_type_name) {
+        if !is_wit_primitive_or_builtin(used_type_name)
+            && !all_type_defs.contains_key(used_type_name)
+        {
             undefined_types.push(used_type_name.clone());
         }
     }
-    
+
     // If there are undefined types, raise an error
     if !undefined_types.is_empty() {
         undefined_types.sort();
