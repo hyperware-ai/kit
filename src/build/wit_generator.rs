@@ -239,7 +239,6 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
 }
 
 // Find all Rust files in a crate directory
-#[instrument(level = "trace", skip_all)]
 fn find_rust_files(crate_path: &Path) -> Vec<PathBuf> {
     let mut rust_files = Vec::new();
     let src_dir = crate_path.join("src");
@@ -515,7 +514,6 @@ fn collect_type_definitions_from_file(
 }
 
 // Find all relevant Rust projects
-#[instrument(level = "trace", skip_all)]
 fn find_rust_projects(base_dir: &Path) -> Vec<PathBuf> {
     let mut projects = Vec::new();
     debug!("Scanning for Rust projects in {}", base_dir.display());
