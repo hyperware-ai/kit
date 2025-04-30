@@ -459,10 +459,9 @@ fn collect_type_definitions_from_file(
                     }
                     Err(e) => {
                         // Return the error instead of just warning
-                        return Err(e.wrap_err(format!(
-                            "Invalid struct name '{}' found",
-                            orig_name
-                        )));
+                        return Err(
+                            e.wrap_err(format!("Invalid struct name '{}' found", orig_name))
+                        );
                     }
                 }
             }
