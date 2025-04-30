@@ -262,10 +262,13 @@ fn find_rust_files(crate_path: &Path) -> Vec<PathBuf> {
     rust_files
 }
 
-// Sanitize field names by removing leading underscores
-fn sanitize_field_name(field_name: String) -> String {
+// Check if a field name starts with an underscore, and if so, strip it and print a warning.
+fn check_and_strip_leading_underscore(field_name: String) -> String {
     if let Some(stripped) = field_name.strip_prefix('_') {
-        println!("    Warning: Field '{}' starts with underscore, removing it", field_name);
+        warn!(field_name = %field_name,
+             "This field prefixed with an underscore, which is not allowed in WIT.
+              Function signatures should not include unused parameters."
+            );
         stripped.to_string()
     } else {
         field_name
@@ -603,7 +606,7 @@ fn generate_signature_struct(
                 // Validate parameter name
                 match validate_name(&param_orig_name, "Parameter") {
                     Ok(_) => {
-                        let param_name = sanitize_field_name(param_orig_name);
+                        let param_name = check_and_strip_leading_underscore(param_orig_name);
                         let param_name = to_kebab_case(&param_name);
 
                         // Rust type to WIT type
