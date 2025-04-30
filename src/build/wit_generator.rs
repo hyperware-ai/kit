@@ -69,8 +69,8 @@ fn validate_name(name: &str, kind: &str) -> Result<()> {
 fn check_and_strip_leading_underscore(field_name: String) -> String {
     if let Some(stripped) = field_name.strip_prefix('_') {
         warn!(field_name = %field_name,
-             "field_name is prefixed with an underscore, which is not allowed in WIT. Function signatures should not include unused parameters."
-            );
+         "field_name is prefixed with an underscore, which is not allowed in WIT. Function signatures should not include unused parameters."
+        );
         stripped.to_string()
     } else {
         field_name
