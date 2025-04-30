@@ -381,11 +381,13 @@ fn collect_type_definitions_from_file(
                         let fields: Result<Vec<String>> = match &item_struct.fields {
                             // Change to collect Result
                             syn::Fields::Named(fields) => {
-                                // Note: The `rust_type_to_wit` calls here still use a *local* `used_types`
-                                // set for *recursive* type discovery *within this struct's definition*.
-                                // This is necessary for correctly formatting types like list<other-used-type>.
-                                // The main `used_types` set (passed as argument) determines *if* this struct
-                                // definition is included at all.
+                                // The recursive calls to `rust_type_to_wit` below use the main `used_types`
+                                // set (passed mutably to this function). This ensures that any nested custom
+                                // types encountered within fields (e.g., the `T` in `list<T>`) are added to
+                                // the main set for the final verification step in `process_rust_project`.
+                                // The initial check `if !used_types.contains(&name)` still determines
+                                // if this specific struct's definition is generated based on direct usage
+                                // in function signatures.
                                 let mut field_strings = Vec::new();
 
                                 for f in &fields.named {
@@ -423,8 +425,11 @@ fn collect_type_definitions_from_file(
                                                 ));
                                             }
                                             Err(e) => {
-                                                warn!(struct_name = %name, error = %e, "Skipping field with invalid name");
-                                                continue; // Or return Err(e) if invalid field names should stop generation
+                                                // Propagate the error instead of just warning and continuing
+                                                return Err(e.wrap_err(format!(
+                                                    "Invalid field name '{}' found in struct '{}'",
+                                                    field_orig_name, name
+                                                )));
                                             }
                                         }
                                     }
@@ -453,8 +458,11 @@ fn collect_type_definitions_from_file(
                         }
                     }
                     Err(e) => {
-                        warn!(error = %e, "Skipping struct with invalid name");
-                        continue;
+                        // Return the error instead of just warning
+                        return Err(e.wrap_err(format!(
+                            "Invalid struct name '{}' found",
+                            orig_name
+                        )));
                     }
                 }
             }
