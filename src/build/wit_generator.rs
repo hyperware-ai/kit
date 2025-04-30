@@ -69,8 +69,7 @@ fn validate_name(name: &str, kind: &str) -> Result<()> {
 fn check_and_strip_leading_underscore(field_name: String) -> String {
     if let Some(stripped) = field_name.strip_prefix('_') {
         warn!(field_name = %field_name,
-             "This field prefixed with an underscore, which is not allowed in WIT.
-              Function signatures should not include unused parameters."
+             "field_name is prefixed with an underscore, which is not allowed in WIT. Function signatures should not include unused parameters."
             );
         stripped.to_string()
     } else {
@@ -405,7 +404,7 @@ fn collect_type_definitions_from_file(
 
                 // Skip trying to validate if name contains "__"
                 if orig_name.contains("__") {
-                    warn!(name = %orig_name, "Skipping likely internal enum");
+                    debug!(name = %orig_name, "Skipping likely internal enum");
                     continue;
                 }
 
@@ -416,7 +415,7 @@ fn collect_type_definitions_from_file(
 
                         // --- Check if this type is used ---
                         if !used_types.contains(&name) {
-                            warn!(original_name = %orig_name, kebab_name = %name, "Skipping type not present in any function signature");
+                            debug!(original_name = %orig_name, kebab_name = %name, "Skipping type not present in any function signature");
                             continue; // Skip this enum if not in the used set
                         }
                         // --- End Check ---
