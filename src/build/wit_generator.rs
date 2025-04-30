@@ -687,7 +687,7 @@ impl AsTypePath for syn::Type {
 // Process a single Rust project and generate WIT files
 #[instrument(level = "trace", skip_all)]
 fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(String, String)>> {
-    info!("Processing project: {}", project_path.display());
+    debug!("Processing project: {}", project_path.display());
 
     // Find lib.rs for this project
     let lib_rs = project_path.join("src").join("lib.rs");
