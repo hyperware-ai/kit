@@ -81,11 +81,11 @@ fn extract_wit_world(attrs: &[Attribute]) -> Result<String> {
         if attr.path().is_ident("hyperprocess") {
             // Convert attribute to string representation
             let attr_str = format!("{:?}", attr);
-            debug!("Attribute string: {}", attr_str);
+            debug!(attr_str = %attr_str, "Attribute string");
 
             // Look for wit_world in the attribute string
             if let Some(pos) = attr_str.find("wit_world") {
-                debug!("Found wit_world at position {}", pos);
+                debug!(pos = %pos, "Found wit_world");
 
                 // Find the literal value after wit_world by looking for lit: "value"
                 let lit_pattern = "lit: \"";
@@ -95,7 +95,7 @@ fn extract_wit_world(attrs: &[Attribute]) -> Result<String> {
                     // Find the closing quote of the literal
                     if let Some(quote_pos) = attr_str[start_pos..].find('\"') {
                         let world_name = &attr_str[start_pos..(start_pos + quote_pos)];
-                        debug!("Extracted wit_world: {}", world_name);
+                        debug!(wit_world = %world_name, "Extracted wit_world");
                         return Ok(world_name.to_string());
                     }
                 }
@@ -243,22 +243,22 @@ fn find_rust_files(crate_path: &Path) -> Vec<PathBuf> {
     let mut rust_files = Vec::new();
     let src_dir = crate_path.join("src");
 
-    debug!("Finding Rust files in {}", src_dir.display());
+    debug!(src_dir = %src_dir.display(), "Finding Rust files");
 
     if !src_dir.exists() || !src_dir.is_dir() {
-        warn!("No src directory found at {}", src_dir.display());
+        warn!(src_dir = %src_dir.display(), "No src directory found");
         return rust_files;
     }
 
     for entry in WalkDir::new(src_dir).into_iter().filter_map(Result::ok) {
         let path = entry.path();
         if path.is_file() && path.extension().map_or(false, |ext| ext == "rs") {
-            debug!("Found Rust file: {}", path.display());
+            debug!(path = %path.display(), "Found Rust file");
             rust_files.push(path.to_path_buf());
         }
     }
 
-    debug!("Found {} Rust files", rust_files.len());
+    debug!(count = %rust_files.len(), "Found Rust files");
     rust_files
 }
 
@@ -269,8 +269,8 @@ fn collect_type_definitions_from_file(
     used_types: &HashSet<String>, // Accept the set of used types
 ) -> Result<HashMap<String, String>> {
     debug!(
-        "Collecting used type definitions from file: {}",
-        file_path.display()
+        file_path = %file_path.display(),
+        "Collecting used type definitions from file"
     );
 
     let content = fs::read_to_string(file_path)
@@ -290,7 +290,7 @@ fn collect_type_definitions_from_file(
                 // Skip trying to validate if name contains "__" as these are likely internal types
                 if orig_name.contains("__") {
                     // This skip can remain, as internal types are unlikely to be in `used_types` anyway
-                    warn!("Skipping likely internal struct: {}", orig_name);
+                    warn!(name = %orig_name, "Skipping likely internal struct");
                     continue;
                 }
 
@@ -306,7 +306,7 @@ fn collect_type_definitions_from_file(
                         }
                         // --- End Check ---
 
-                        debug!("  Found used struct: {} -> {}", orig_name, name);
+                        debug!(original_name = %orig_name, kebab_name = %name, "Found used struct");
 
                         // Proceed with field processing only if the struct is used
                         let fields: Vec<String> = match &item_struct.fields {
@@ -327,6 +327,7 @@ fn collect_type_definitions_from_file(
                                                 let field_name = to_kebab_case(&field_orig_name);
                                                 if field_name.is_empty() {
                                                     warn!(
+                                                        struct_name = %name, field_original_name = %field_orig_name,
                                                         "Skipping field with empty name conversion"
                                                     );
                                                     continue;
@@ -340,7 +341,7 @@ fn collect_type_definitions_from_file(
                                                 ) {
                                                     Ok(ty) => ty,
                                                     Err(e) => {
-                                                        warn!("Error converting field type: {}", e);
+                                                        warn!(struct_name = %name, field_name = %field_name, error = %e, "Error converting field type");
                                                         // Propagate error if field type conversion fails
                                                         return Err(e);
                                                     }
@@ -356,10 +357,7 @@ fn collect_type_definitions_from_file(
                                                 ));
                                             }
                                             Err(e) => {
-                                                warn!(
-                                                    "    Skipping field with invalid name: {}",
-                                                    e
-                                                );
+                                                warn!(struct_name = %name, error = %e, "Skipping field with invalid name");
                                                 // Decide if you want to continue or error out
                                                 continue;
                                             }
@@ -378,12 +376,12 @@ fn collect_type_definitions_from_file(
                                 format!("    record {} {{\n{}\n    }}", name, fields.join(",\n")),
                             );
                         } else {
-                            warn!("  Skipping used struct {} with no convertible fields", name);
+                            warn!(name = %name, "Skipping used struct with no convertible fields");
                         }
                     }
                     Err(e) => {
                         // Struct name validation failed, skip regardless of usage
-                        warn!("  Skipping struct with invalid name: {}", e);
+                        warn!(error = %e, "Skipping struct with invalid name");
                         continue;
                     }
                 }
@@ -394,7 +392,7 @@ fn collect_type_definitions_from_file(
 
                 // Skip trying to validate if name contains "__"
                 if orig_name.contains("__") {
-                    warn!("  Skipping likely internal enum: {}", orig_name);
+                    warn!(name = %orig_name, "Skipping likely internal enum");
                     continue;
                 }
 
@@ -405,15 +403,12 @@ fn collect_type_definitions_from_file(
 
                         // --- Check if this type is used ---
                         if !used_types.contains(&name) {
-                            warn!(
-                                "  Skipping type not present in any function signature: {} -> {}",
-                                orig_name, name
-                            ); // Optional debug log
+                            warn!(original_name = %orig_name, kebab_name = %name, "Skipping type not present in any function signature");
                             continue; // Skip this enum if not in the used set
                         }
                         // --- End Check ---
 
-                        debug!("  Found used enum: {} -> {}", orig_name, name);
+                        debug!(original_name = %orig_name, kebab_name = %name, "Found used enum");
 
                         // Proceed with variant processing only if the enum is used
                         let mut variants = Vec::new();
@@ -436,20 +431,14 @@ fn collect_type_definitions_from_file(
                                                 Ok(ty) => {
                                                     let variant_name =
                                                         to_kebab_case(&variant_orig_name);
-                                                    debug!(
-                                                        "    Variant: {} -> {}({})",
-                                                        variant_orig_name, variant_name, ty
-                                                    );
+                                                    debug!(original_name = %variant_orig_name, kebab_name = %variant_name, ty_str = %ty, "Found enum variant with type");
                                                     variants.push(format!(
                                                         "        {}({})",
                                                         variant_name, ty
                                                     ));
                                                 }
                                                 Err(e) => {
-                                                    warn!(
-                                                        "    Error converting variant type: {}",
-                                                        e
-                                                    );
+                                                    warn!(enum_name = %name, variant_name = %variant_orig_name, error = %e, "Error converting variant type");
                                                     // Propagate error if variant type conversion fails
                                                     return Err(e);
                                                 }
@@ -457,24 +446,18 @@ fn collect_type_definitions_from_file(
                                         }
                                         syn::Fields::Unit => {
                                             let variant_name = to_kebab_case(&variant_orig_name);
-                                            debug!(
-                                                "    Variant: {} -> {}",
-                                                variant_orig_name, variant_name
-                                            );
+                                            debug!(original_name = %variant_orig_name, kebab_name = %variant_name, "Found unit enum variant");
                                             variants.push(format!("        {}", variant_name));
                                         }
                                         _ => {
-                                            warn!(
-                                                "    Skipping complex variant in used enum {}: {}",
-                                                name, variant_orig_name
-                                            );
+                                            warn!(enum_name = %name, variant_name = %variant_orig_name, "Skipping complex variant in used enum");
                                             skip_enum = true; // Skip the whole enum if one variant is complex
                                             break;
                                         }
                                     }
                                 }
                                 Err(e) => {
-                                    warn!("    Skipping variant with invalid name in used enum {}: {}", name, e);
+                                    warn!(enum_name = %name, error = %e, "Skipping variant with invalid name in used enum");
                                     skip_enum = true; // Skip the whole enum if one variant name is invalid
                                     break;
                                 }
@@ -492,12 +475,12 @@ fn collect_type_definitions_from_file(
                                 ),
                             );
                         } else {
-                            warn!("  Skipping used enum {} due to complex/invalid variants or no variants", name);
+                            warn!(name = %name, "Skipping used enum due to complex/invalid variants or no variants");
                         }
                     }
                     Err(e) => {
                         // Enum name validation failed, skip regardless of usage
-                        warn!("  Skipping enum with invalid name: {}", e);
+                        warn!(error = %e, "Skipping enum with invalid name");
                         continue;
                     }
                 }
@@ -507,8 +490,8 @@ fn collect_type_definitions_from_file(
     }
 
     debug!(
-        "Collected {} used type definitions from this file",
-        type_defs.len()
+        count = %type_defs.len(), file_path = %file_path.display(),
+        "Collected used type definitions from this file"
     );
     Ok(type_defs)
 }
@@ -516,7 +499,7 @@ fn collect_type_definitions_from_file(
 // Find all relevant Rust projects
 fn find_rust_projects(base_dir: &Path) -> Vec<PathBuf> {
     let mut projects = Vec::new();
-    debug!("Scanning for Rust projects in {}", base_dir.display());
+    debug!(base_dir = %base_dir.display(), "Scanning for Rust projects");
 
     for entry in WalkDir::new(base_dir)
         .max_depth(1)
@@ -529,7 +512,7 @@ fn find_rust_projects(base_dir: &Path) -> Vec<PathBuf> {
             continue;
         }
         let cargo_toml = path.join("Cargo.toml");
-        debug!("Checking {}", cargo_toml.display());
+        debug!(path = %cargo_toml.display(), "Checking path");
 
         if !cargo_toml.exists() {
             continue;
@@ -547,10 +530,7 @@ fn find_rust_projects(base_dir: &Path) -> Vec<PathBuf> {
             .and_then(|p| p.get("metadata"))
             .and_then(|m| m.get("component"))
         else {
-            warn!(
-                "  No package.metadata.component metadata found in {}",
-                cargo_toml.display()
-            ); // Added path context
+            warn!(path = %cargo_toml.display(), "No package.metadata.component metadata found");
             continue;
         };
         let Some(package) = metadata.get("package") else {
@@ -559,17 +539,14 @@ fn find_rust_projects(base_dir: &Path) -> Vec<PathBuf> {
         let Some(package_str) = package.as_str() else {
             continue;
         };
-        debug!(
-            "  Found package.metadata.component.package = {:?}",
-            package_str
-        );
+        debug!(package = %package_str, "Found package.metadata.component.package");
         if package_str == "hyperware:process" {
-            debug!("  Adding project: {}", path.display()); // INFO -> DEBUG
+            debug!(path = %path.display(), "Adding project");
             projects.push(path.to_path_buf());
         }
     }
 
-    debug!("Found {} relevant Rust projects", projects.len());
+    debug!(count = %projects.len(), "Found relevant Rust projects");
     projects
 }
 
@@ -626,13 +603,13 @@ fn generate_signature_struct(
                                     .push(format!("        {}: {}", param_name, param_type));
                             }
                             Err(e) => {
-                                warn!("    Error converting parameter type: {}", e);
+                                warn!(param_name = %param_name, error = %e, "Error converting parameter type");
                                 return Err(e);
                             }
                         }
                     }
                     Err(e) => {
-                        warn!("    Skipping parameter with invalid name: {}", e);
+                        warn!(error = %e, "Skipping parameter with invalid name");
                         return Err(e);
                     }
                 }
@@ -647,7 +624,7 @@ fn generate_signature_struct(
                 struct_fields.push(format!("        returning: {}", return_type));
             }
             Err(e) => {
-                warn!("    Error converting return type: {}", e);
+                warn!(struct_name = %signature_struct_name, error = %e, "Error converting return type");
                 return Err(e);
             }
         },
@@ -685,13 +662,13 @@ impl AsTypePath for syn::Type {
 // Process a single Rust project and generate WIT files
 #[instrument(level = "trace", skip_all)]
 fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(String, String)>> {
-    debug!("Processing project: {}", project_path.display());
+    debug!(project_path = %project_path.display(), "Processing project");
 
     // Find lib.rs for this project
     let lib_rs = project_path.join("src").join("lib.rs");
 
     if !lib_rs.exists() {
-        warn!("No lib.rs found for project: {}", project_path.display());
+        warn!(project_path = %project_path.display(), "No lib.rs found for project");
         return Ok(None);
     }
 
@@ -734,7 +711,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             // Extract the wit_world name
             match extract_wit_world(&[attr.clone()]) {
                 Ok(world_name) => {
-                    debug!("Extracted wit_world: {}", world_name);
+                    debug!(wit_world = %world_name, "Extracted wit_world");
                     wit_world = Some(world_name);
 
                     // Get the interface name from the impl type
@@ -752,7 +729,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     };
                     // Validate the interface name
                     if let Err(e) = validate_name(name, "Interface") {
-                        warn!("Interface name validation failed: {}", e);
+                        warn!(interface_name = %name, error = %e, "Interface name validation failed");
                         continue; // Skip this impl block if validation fails
                     }
 
@@ -762,9 +739,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     // Convert to kebab-case for file name and interface name
                     kebab_interface_name = Some(to_kebab_case(&base_name));
 
-                    debug!("Interface name: {:?}", interface_name);
-                    debug!("Base name: {}", base_name);
-                    debug!("Kebab interface name: {:?}", kebab_interface_name);
+                    debug!(interface_name = ?interface_name, base_name = %base_name, kebab_name = ?kebab_interface_name, "Interface details");
 
                     // Save the impl item for later processing
                     impl_item_with_hyperprocess = Some(impl_item.clone());
@@ -788,7 +763,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     continue;
                 };
                 let method_name = method.sig.ident.to_string();
-                debug!("Examining method: {}", method_name);
+                debug!(method_name = %method_name, "Examining method");
 
                 // Check for attribute types
                 let has_remote = method
@@ -809,10 +784,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     .any(|attr| attr.path().is_ident("init"));
 
                 if has_remote || has_local || has_http || has_init {
-                    debug!(
-                        "    Has relevant attributes: remote={}, local={}, http={}, init={}",
-                        has_remote, has_local, has_http, has_init
-                    );
+                    debug!(remote = %has_remote, local = %has_local, http = %has_http, init = %has_init, "Method attributes");
 
                     // Validate function name
                     match validate_name(&method_name, "Function") {
@@ -820,16 +792,10 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                             // Convert function name to kebab-case
                             let func_kebab_name = to_kebab_case(&method_name); // Use different var name
                             
-                            debug!(
-                                "    Processing method: {} -> {}",
-                                method_name, func_kebab_name
-                            );
+                            debug!(original_name = %method_name, kebab_name = %func_kebab_name, "Processing method");
 
                             if has_init {
-                                debug!(
-                                    "    Found initialization function: {}",
-                                    method_name
-                                );
+                                debug!(method_name = %method_name, "Found initialization function");
                                 continue;
                             }
                             // This will populate `used_types`
@@ -842,7 +808,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                                 ) {
                                     Ok(remote_struct) => signature_structs.push(remote_struct),
                                     Err(e) => {
-                                        warn!("    Error generating remote signature struct: {}", e)
+                                        warn!(method_name = %method_name, error = %e, "Error generating remote signature struct");
                                     }
                                 }
                             }
@@ -856,7 +822,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                                 ) {
                                     Ok(local_struct) => signature_structs.push(local_struct),
                                     Err(e) => {
-                                        warn!("    Error generating local signature struct: {}", e)
+                                        warn!(method_name = %method_name, error = %e, "Error generating local signature struct");
                                     }
                                 }
                             }
@@ -870,25 +836,23 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                                 ) {
                                     Ok(http_struct) => signature_structs.push(http_struct),
                                     Err(e) => {
-                                        warn!("    Error generating HTTP signature struct: {}", e)
+                                        warn!(method_name = %method_name, error = %e, "Error generating HTTP signature struct");
                                     }
                                 }
                             }
                         }
                         Err(e) => {
                             warn!("    Skipping method with invalid name: {}", e);
+                            warn!(method_name = %method_name, error = %e, "Skipping method with invalid name");
                         }
                     }
                 } else {
                     warn!("   Method {} does not have the [remote], [local], [http] or [init] attribute, it should not be in the Impl block", method_name);
+                    warn!(method_name = %method_name, "Method missing required attribute ([remote], [local], [http], or [init])");
                 }
             }
         }
     }
-    debug!(
-        "Identified {} used types from function signatures.",
-        used_types.len()
-    );
 
     // Collect **only used** type definitions from all Rust files
     let mut all_type_defs = HashMap::new(); // Now starts empty, filled by collector
@@ -902,17 +866,13 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                 }
             }
             Err(e) => {
-                warn!(
-                    "Error collecting type definitions from {}: {}",
-                    file_path.display(),
-                    e
-                );
+                warn!(file_path = %file_path.display(), error = %e, "Error collecting type definitions from file");
                 // Continue with other files
             }
         }
     }
 
-    debug!("Collected {} used type definitions", all_type_defs.len());
+    debug!(count = %all_type_defs.len(), "Collected used type definitions");
 
     // Now generate the WIT content for the interface
     if let (Some(ref iface_name), Some(ref kebab_name), Some(ref _impl_item)) = (
@@ -925,15 +885,11 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         let mut type_defs: Vec<String> = all_type_defs.into_values().collect(); // Collect values directly
 
         type_defs.sort(); // Sort for consistent output
-        debug!("Including {} used type definitions", type_defs.len());
 
         // Generate the final WIT content
         if signature_structs.is_empty() && type_defs.is_empty() {
             // Check both sigs and types
-            warn!(
-                "No functions or used types found for interface {}",
-                iface_name
-            );
+            warn!(interface_name = %iface_name, "No functions or used types found for interface");
         } else {
             // Start with the interface comment
             let mut content = "    // This interface contains function signature definitions that will be used\n    // by the hyper-bindgen macro to generate async function bindings.\n    //\n    // NOTE: This is currently a hacky workaround since WIT async functions are not\n    // available until WASI Preview 3. Once Preview 3 is integrated into Hyperware,\n    // we should switch to using proper async WIT function signatures instead of\n    // this struct-based approach with hyper-bindgen generating the async stubs.\n".to_string();
@@ -955,16 +911,11 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             // Wrap in interface block
             let final_content =
                 format!("interface {} {{\n{}\n}}\n", kebab_name, content.trim_end()); // Trim trailing whitespace
-            debug!(
-                "Generated interface content for {} with {} signature structs and {} type definitions",
-                iface_name,
-                signature_structs.len(),
-                type_defs.len() // Use the count from the final vector
-            );
+            debug!(interface_name = %iface_name, signature_count = %signature_structs.len(), type_def_count = %type_defs.len(), "Generated interface content");
 
             // Write the interface file with kebab-case name
             let interface_file = api_dir.join(format!("{}.wit", kebab_name));
-            debug!("Writing WIT file to {}", interface_file.display());
+            debug!(path = %interface_file.display(), "Writing WIT file");
 
             fs::write(&interface_file, &final_content)
                 .with_context(|| format!("Failed to write {}", interface_file.display()))?;
@@ -979,7 +930,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     if let (Some(wit_world), Some(_), Some(kebab_iface)) =
         (wit_world, interface_name, kebab_interface_name)
     {
-        debug!("Returning import statement for interface {}", kebab_iface);
+        debug!(interface = %kebab_iface, "Returning import statement for interface");
         // Use kebab-case interface name for import
         Ok(Some((kebab_iface, wit_world)))
     } else {
@@ -987,6 +938,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         Ok(None)
     }
 }
+
 #[instrument(level = "trace", skip_all)]
 fn rewrite_wit(
     api_dir: &Path,
@@ -994,7 +946,7 @@ fn rewrite_wit(
     wit_worlds: &mut HashSet<String>,
     updated_world: &mut bool,
 ) -> Result<()> {
-    debug!("Rewriting WIT world files in {}", api_dir.display());
+    debug!(api_dir = %api_dir.display(), "Rewriting WIT world files");
     // handle existing api files
     for entry in WalkDir::new(api_dir)
         .max_depth(1)
@@ -1004,7 +956,7 @@ fn rewrite_wit(
         let path = entry.path();
 
         if path.is_file() && path.extension().map_or(false, |ext| ext == "wit") {
-            debug!("Checking WIT file: {}", path.display());
+            debug!(path = %path.display(), "Checking WIT file");
 
             let Ok(content) = fs::read_to_string(path) else {
                 continue;
@@ -1038,7 +990,7 @@ fn rewrite_wit(
                 continue;
             };
 
-            debug!("Extracted world name: {}", world_name);
+            debug!(world_name = %world_name, "Extracted world name");
 
             // Check if this world name matches the one we're looking for
             if wit_worlds.remove(&world_name) || wit_worlds.contains(&world_name[6..]) {
@@ -1049,7 +1001,7 @@ fn rewrite_wit(
                     &mut include_lines,
                 )?;
 
-                debug!("Writing updated world definition to {}", path.display());
+                debug!(path = %path.display(), "Writing updated world definition");
                 // Write the updated world file
                 fs::write(path, world_content).with_context(|| {
                     format!("Failed to write updated world file: {}", path.display())
@@ -1069,7 +1021,7 @@ fn rewrite_wit(
                 generate_wit_file(&wit_world, new_imports, &Vec::new(), &mut HashSet::new())?;
 
             let path = api_dir.join(format!("{wit_world}.wit"));
-            debug!("Writing updated world definition to {}", path.display());
+            debug!(path = %path.display(), wit_world = %wit_world, "Writing new world definition");
             // Write the updated world file
             fs::write(&path, world_content).with_context(|| {
                 format!("Failed to write updated world file: {}", path.display())
@@ -1164,15 +1116,16 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
 
                 wit_worlds.insert(wit_world);
             }
-            Ok(None) => warn!(
-                "No import statement generated for project: {}",
-                project_path.display()
-            ), // Add path context
-            Err(e) => warn!("Error processing project {}: {}", project_path.display(), e), // Add path context
+            Ok(None) => {
+                warn!(project_path = %project_path.display(), "No import statement generated for project");
+            },
+            Err(e) => {
+                warn!(project_path = %project_path.display(), error = %e, "Error processing project");
+            },
         }
     }
 
-    debug!("Collected {} new imports", new_imports.len());
+    debug!(count = %new_imports.len(), "Collected number of new imports");
 
     // Check for existing world definition files and update them
     debug!("Looking for existing world definition files");
@@ -1184,10 +1137,7 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
     if !updated_world && !new_imports.is_empty() {
         // Define default world name
         let default_world = "async-app-template-dot-os-v0";
-        warn!(
-            "No existing world definitions found, creating default with name: {}",
-            default_world
-        );
+        warn!(default_world = %default_world, "No existing world definitions found, creating default");
 
         // Create world content with process-v1 include and proper indentation for imports
         let imports_with_indent: Vec<String> = new_imports
@@ -1216,10 +1166,7 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
         );
 
         let world_file = api_dir.join(format!("{}.wit", default_world));
-        debug!(
-            "Writing default world definition to {}",
-            world_file.display()
-        );
+        debug!(path = %world_file.display(), "Writing default world definition");
 
         fs::write(&world_file, world_content).with_context(|| {
             format!(
