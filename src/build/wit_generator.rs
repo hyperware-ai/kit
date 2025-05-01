@@ -1240,7 +1240,6 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
         let default_world = "async-app-template-dot-os-v0";
         warn!(default_world = %default_world, "No existing world definitions found or created for collected imports, creating default world file");
 
-
         // Determine include based on world name
         let include_line = if default_world.starts_with("types-") {
             "include lib;"
@@ -1268,7 +1267,7 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
         debug!("Successfully created default world definition");
         updated_world = true; // Mark that a world file was indeed created
     }
-    
+
     if !updated_world {
         info!("No world files were updated or created (either no imports needed adding, target worlds already existed/updated, or no default was needed).");
     }
