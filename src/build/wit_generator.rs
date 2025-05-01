@@ -1224,14 +1224,13 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
                 wit_worlds.insert(wit_world);
             }
             Ok(None) => {
-                bail!("No import statement generated for project {}", project_path.display());
+                bail!(
+                    "No import statement generated for project {}",
+                    project_path.display()
+                );
             }
             Err(e) => {
-                bail!(
-                    "Error processing project {}: {}",
-                    project_path.display(),
-                    e
-                );
+                bail!("Error processing project {}: {}", project_path.display(), e);
             }
         }
     }
