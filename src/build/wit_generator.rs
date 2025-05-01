@@ -367,10 +367,10 @@ fn find_and_make_wit_type_def(
         };
 
         if is_target {
-             // Skip internal-looking types (can be adjusted)
+            // Skip internal-looking types (can be adjusted)
             if orig_name.contains("__") {
-                 warn!(name = %orig_name, "Skipping definition search for likely internal type");
-                 return Ok(None); // Treat as not found for WIT purposes
+                warn!(name = %orig_name, "Skipping definition search for likely internal type");
+                return Ok(None); // Treat as not found for WIT purposes
             }
             // Validate the original Rust name
             validate_name(&orig_name, item_kind)?;
@@ -446,25 +446,31 @@ fn find_and_make_wit_type_def(
 
                 for v in &item_enum.variants {
                     let variant_orig_name = v.ident.to_string();
-                     // Validate variant name before proceeding
+                    // Validate variant name before proceeding
                     validate_name(&variant_orig_name, "Enum variant")?;
                     let variant_kebab_name = to_kebab_case(&variant_orig_name);
 
                     match &v.fields {
                         // Variant with one unnamed field: T -> case(T)
                         syn::Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
-                             // `rust_type_to_wit` adds new custom types to `global_used_types`
+                            // `rust_type_to_wit` adds new custom types to `global_used_types`
                             let type_result = rust_type_to_wit(
                                 &fields.unnamed.first().unwrap().ty,
                                 global_used_types,
                             )
-                            .wrap_err_with(|| format!("Failed to convert variant '{}' type in enum '{}'", variant_orig_name, orig_name))?;
+                            .wrap_err_with(|| {
+                                format!(
+                                    "Failed to convert variant '{}' type in enum '{}'",
+                                    variant_orig_name, orig_name
+                                )
+                            })?;
 
-                             // Check if the variant's type is custom and add to local deps
+                            // Check if the variant's type is custom and add to local deps
                             if !is_wit_primitive_or_builtin(&type_result) {
                                 local_dependencies.insert(type_result.clone());
                             }
-                            variants_wit.push(format!("        {}({})", variant_kebab_name, type_result));
+                            variants_wit
+                                .push(format!("        {}({})", variant_kebab_name, type_result));
                         }
                         // Unit variant: -> case
                         syn::Fields::Unit => {
@@ -494,8 +500,8 @@ fn find_and_make_wit_type_def(
                     return Ok(None);
                 }
             }
-             // Should not be reached if item is Struct or Enum and is_target is true
-             unreachable!("Target type matched but was neither struct nor enum?");
+            // Should not be reached if item is Struct or Enum and is_target is true
+            unreachable!("Target type matched but was neither struct nor enum?");
         }
     }
 
@@ -703,12 +709,20 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     let rust_files = find_rust_files(project_path);
     if rust_files.is_empty() {
         warn!(project_path=%project_path.display(), "No Rust files found in src/, skipping project");
-        return Ok(None)
+        return Ok(None);
     }
-    let lib_content = fs::read_to_string(&lib_rs)
-        .with_context(|| format!("Failed to read lib.rs for project: {}", project_path.display()))?;
-    let ast = syn::parse_file(&lib_content)
-        .with_context(|| format!("Failed to parse lib.rs for project: {}", project_path.display()))?;
+    let lib_content = fs::read_to_string(&lib_rs).with_context(|| {
+        format!(
+            "Failed to read lib.rs for project: {}",
+            project_path.display()
+        )
+    })?;
+    let ast = syn::parse_file(&lib_content).with_context(|| {
+        format!(
+            "Failed to parse lib.rs for project: {}",
+            project_path.display()
+        )
+    })?;
 
     // --- 1. Find Hyperprocess Impl Block & Extract Metadata ---
     let mut wit_world = None;
@@ -737,7 +751,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
                         if let Some(ref name) = interface_name {
                             // Validate original name first
-                             match validate_name(name, "Interface") {
+                            match validate_name(name, "Interface") {
                                 Ok(_) => {
                                     let base_name = remove_state_suffix(name);
                                     kebab_interface_name = Some(to_kebab_case(&base_name));
@@ -747,7 +761,10 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                                 }
                                 Err(e) => {
                                     // Escalate errors for invalid interface names instead of just warning
-                                    return Err(e.wrap_err(format!("Invalid interface name '{}' in hyperprocess impl block", name)));
+                                    return Err(e.wrap_err(format!(
+                                        "Invalid interface name '{}' in hyperprocess impl block",
+                                        name
+                                    )));
                                 }
                             }
                         } else {
@@ -771,7 +788,6 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     let kebab_name = kebab_interface_name.as_ref().unwrap();
     let current_wit_world = wit_world.as_ref().unwrap();
 
-
     // --- 2. Collect Signatures & Initial Types ---
     let mut signature_structs = Vec::new(); // Stores WIT string for each signature record
     let mut global_used_types = HashSet::new(); // All custom WIT types encountered (kebab-case)
@@ -788,33 +804,48 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             let has_init = method.attrs.iter().any(|a| a.path().is_ident("init"));
 
             if has_remote || has_local || has_http || has_init {
-                 debug!(remote=%has_remote, local=%has_local, http=%has_http, init=%has_init, "Method attributes found");
-                 // Validate original Rust function name
-                 validate_name(&method_name, "Function")?; // Error early if name invalid
-                 let func_kebab_name = to_kebab_case(&method_name);
+                debug!(remote=%has_remote, local=%has_local, http=%has_http, init=%has_init, "Method attributes found");
+                // Validate original Rust function name
+                validate_name(&method_name, "Function")?; // Error early if name invalid
+                let func_kebab_name = to_kebab_case(&method_name);
 
-                 if has_init {
-                     debug!(method_name = %method_name, "Found [init] function, skipping signature generation");
-                     continue;
-                 }
+                if has_init {
+                    debug!(method_name = %method_name, "Found [init] function, skipping signature generation");
+                    continue;
+                }
 
-                 // Generate signature structs. `generate_signature_struct` calls `rust_type_to_wit`,
-                 // which populates `global_used_types` with all custom types found in parameters/return types.
-                 if has_remote {
-                     let sig_struct = generate_signature_struct(&func_kebab_name, "remote", method, &mut global_used_types)?;
-                     signature_structs.push(sig_struct);
-                 }
-                 if has_local {
-                     let sig_struct = generate_signature_struct(&func_kebab_name, "local", method, &mut global_used_types)?;
-                     signature_structs.push(sig_struct);
-                 }
-                 if has_http {
-                     let sig_struct = generate_signature_struct(&func_kebab_name, "http", method, &mut global_used_types)?;
-                     signature_structs.push(sig_struct);
-                 }
+                // Generate signature structs. `generate_signature_struct` calls `rust_type_to_wit`,
+                // which populates `global_used_types` with all custom types found in parameters/return types.
+                if has_remote {
+                    let sig_struct = generate_signature_struct(
+                        &func_kebab_name,
+                        "remote",
+                        method,
+                        &mut global_used_types,
+                    )?;
+                    signature_structs.push(sig_struct);
+                }
+                if has_local {
+                    let sig_struct = generate_signature_struct(
+                        &func_kebab_name,
+                        "local",
+                        method,
+                        &mut global_used_types,
+                    )?;
+                    signature_structs.push(sig_struct);
+                }
+                if has_http {
+                    let sig_struct = generate_signature_struct(
+                        &func_kebab_name,
+                        "http",
+                        method,
+                        &mut global_used_types,
+                    )?;
+                    signature_structs.push(sig_struct);
+                }
             } else {
-                 // Method in hyperprocess impl lacks required attribute - Error
-                 return Err(eyre!(
+                // Method in hyperprocess impl lacks required attribute - Error
+                return Err(eyre!(
                          "Method '{}' in the #[hyperprocess] impl block is missing a required attribute ([remote], [local], [http], or [init]). Only methods with these attributes should be included.",
                          method_name
                      ));
@@ -822,7 +853,6 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         }
     }
     debug!(signature_count = %signature_structs.len(), initial_used_types = ?global_used_types, "Completed signature analysis");
-
 
     // --- 3. Resolve & Generate Type Definitions Iteratively ---
     debug!("Starting iterative type definition resolution");
@@ -834,13 +864,12 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         .collect();
     let mut processed_types = HashSet::new(); // Track types processed to avoid cycles/redundancy
 
-     // Add primitives/builtins to processed_types initially
-     for ty in &global_used_types {
-         if is_wit_primitive_or_builtin(ty) {
-             processed_types.insert(ty.clone());
-         }
-     }
-
+    // Add primitives/builtins to processed_types initially
+    for ty in &global_used_types {
+        if is_wit_primitive_or_builtin(ty) {
+            processed_types.insert(ty.clone());
+        }
+    }
 
     while let Some(type_name_to_find) = types_to_find_queue.pop() {
         if processed_types.contains(&type_name_to_find) {
@@ -852,17 +881,20 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
         // Search across all project files for the definition
         for file_path in &rust_files {
-            match find_and_make_wit_type_def(file_path, &type_name_to_find, &mut global_used_types) {
+            match find_and_make_wit_type_def(file_path, &type_name_to_find, &mut global_used_types)
+            {
                 Ok(Some((wit_definition, new_local_deps))) => {
                     debug!(type_name=%type_name_to_find, file_path=%file_path.display(), "Found definition");
 
                     // Store the definition. Check for duplicates across files.
-                    if let Some(existing_def) = generated_type_defs.insert(type_name_to_find.clone(), wit_definition) {
-                         // Simple string comparison might be too strict if formatting differs slightly.
-                         // But good enough for a warning.
-                         if existing_def != *generated_type_defs.get(&type_name_to_find).unwrap() {
+                    if let Some(existing_def) =
+                        generated_type_defs.insert(type_name_to_find.clone(), wit_definition)
+                    {
+                        // Simple string comparison might be too strict if formatting differs slightly.
+                        // But good enough for a warning.
+                        if existing_def != *generated_type_defs.get(&type_name_to_find).unwrap() {
                             warn!(type_name = %type_name_to_find, "Type definition found in multiple files with different generated content. Using the one from: {}", file_path.display());
-                         }
+                        }
                     }
                     processed_types.insert(type_name_to_find.clone()); // Mark as processed
                     definition_found_in_project = true;
@@ -870,7 +902,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     // Add newly discovered dependencies from this type's definition to the queue
                     for dep in new_local_deps {
                         if !processed_types.contains(&dep) && !types_to_find_queue.contains(&dep) {
-                             debug!(dependency = %dep, discovered_by = %type_name_to_find, "Adding new dependency to find queue");
+                            debug!(dependency = %dep, discovered_by = %type_name_to_find, "Adding new dependency to find queue");
                             types_to_find_queue.push(dep);
                         }
                     }
@@ -879,26 +911,27 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                 }
                 Ok(None) => continue, // Not in this file, check next file
                 Err(e) => {
-                     return Err(e); // <-- CHANGE IS HERE
-                 }
+                    return Err(e); // <-- CHANGE IS HERE
+                }
             }
         }
-         // If after checking all files, the definition wasn't found
-         if !definition_found_in_project {
-             debug!(type_name=%type_name_to_find, "Definition not found in any scanned file.");
-             // Mark as processed to avoid infinite loop. Verification step will catch this.
-             processed_types.insert(type_name_to_find.clone());
-         }
+        // If after checking all files, the definition wasn't found
+        if !definition_found_in_project {
+            debug!(type_name=%type_name_to_find, "Definition not found in any scanned file.");
+            // Mark as processed to avoid infinite loop. Verification step will catch this.
+            processed_types.insert(type_name_to_find.clone());
+        }
     }
     debug!("Finished iterative type definition resolution");
-
 
     // --- 4. Verify All Used Types Have Definitions ---
     debug!(final_used_types = ?global_used_types, found_definitions = ?generated_type_defs.keys(), "Starting final verification");
     let mut undefined_types = Vec::new();
     for used_type_name in &global_used_types {
-        if !is_wit_primitive_or_builtin(used_type_name) && !generated_type_defs.contains_key(used_type_name) {
-             warn!(type_name=%used_type_name, "Verification failed: Used type has no generated definition.");
+        if !is_wit_primitive_or_builtin(used_type_name)
+            && !generated_type_defs.contains_key(used_type_name)
+        {
+            warn!(type_name=%used_type_name, "Verification failed: Used type has no generated definition.");
             undefined_types.push(used_type_name.clone());
         }
     }
@@ -916,8 +949,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
              undefined_types
         );
     }
-     debug!("Verification successful: All used types have definitions or are built-in.");
-
+    debug!("Verification successful: All used types have definitions or are built-in.");
 
     // --- 5. Generate Final WIT Interface File ---
     let mut all_generated_defs: Vec<String> = generated_type_defs.into_values().collect();
@@ -926,10 +958,10 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
     if signature_structs.is_empty() && all_generated_defs.is_empty() {
         warn!(interface_name = %interface_name.as_ref().unwrap(), "No attributed functions or used types found. No WIT interface file generated for this project.");
-         // No interface generated, but maybe the world file still needs creating/updating?
-         // Let's return None for the interface part, the main function handles world logic.
-         // We still need to return the world name though.
-         // Return None for interface means no `import` statement added later.
+        // No interface generated, but maybe the world file still needs creating/updating?
+        // Let's return None for the interface part, the main function handles world logic.
+        // We still need to return the world name though.
+        // Return None for interface means no `import` statement added later.
         return Ok(None); // Indicate no interface content was generated
     } else {
         debug!(kebab_name=%kebab_name, "Generating final WIT content");
@@ -940,16 +972,16 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
         // Add type definitions
         if !all_generated_defs.is_empty() {
-             content.push('\n'); // Separator
-             debug!(count=%all_generated_defs.len(), "Adding type definitions to interface");
+            content.push('\n'); // Separator
+            debug!(count=%all_generated_defs.len(), "Adding type definitions to interface");
             content.push_str(&all_generated_defs.join("\n\n"));
-             content.push('\n');
+            content.push('\n');
         }
 
         // Add signature structs
         if !signature_structs.is_empty() {
-             content.push('\n'); // Separator
-             debug!(count=%signature_structs.len(), "Adding signature structs to interface");
+            content.push('\n'); // Separator
+            debug!(count=%signature_structs.len(), "Adding signature structs to interface");
             content.push_str(&signature_structs.join("\n\n"));
         }
 
@@ -960,11 +992,15 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         // Write the interface file
         let interface_file = api_dir.join(format!("{}.wit", kebab_name));
         debug!(path = %interface_file.display(), "Writing WIT file");
-        fs::write(&interface_file, &final_content)
-            .with_context(|| format!("Failed to write WIT interface file: {}", interface_file.display()))?;
+        fs::write(&interface_file, &final_content).with_context(|| {
+            format!(
+                "Failed to write WIT interface file: {}",
+                interface_file.display()
+            )
+        })?;
         debug!("Successfully wrote WIT file");
 
-         // If content was generated, return the kebab name for the import statement
+        // If content was generated, return the kebab name for the import statement
         debug!(interface = %kebab_name, wit_world=%current_wit_world, "Returning import statement info");
         Ok(Some((
             kebab_name.to_string(),
