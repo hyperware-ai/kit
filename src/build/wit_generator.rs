@@ -69,7 +69,7 @@ fn validate_name(name: &str, kind: &str) -> Result<()> {
 fn check_and_strip_leading_underscore(field_name: String) -> String {
     if let Some(stripped) = field_name.strip_prefix('_') {
         warn!(field_name = %field_name,
-         "field_name is prefixed with an underscore, which is not allowed in WIT. Function signatures should not include unused parameters."
+         "      Warning: Field name starts with an underscore ('_'), which is invalid in WIT. Stripping the underscore from WIT definition. Function signatures should only include parameters that are actually used."
         );
         stripped.to_string()
     } else {
@@ -196,39 +196,31 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                     if let syn::PathArguments::AngleBracketed(args) =
                         &type_path.path.segments.last().unwrap().arguments
                     {
-                        if args.args.len() >= 1 {
-                            // Allow one or two args for Result
-                            if let Some(syn::GenericArgument::Type(ok_ty)) = args.args.first() {
+                        // Strictly enforce exactly two arguments for Result<T, E>
+                        if args.args.len() == 2 {
+                            if let (
+                                Some(syn::GenericArgument::Type(ok_ty)),
+                                Some(syn::GenericArgument::Type(err_ty)),
+                            ) = (args.args.first(), args.args.get(1))
+                            {
                                 let ok_type_str = rust_type_to_wit(ok_ty, used_types)?;
+                                let err_type_str = rust_type_to_wit(err_ty, used_types)?;
 
-                                let err_type_str = if args.args.len() >= 2 {
-                                    if let Some(syn::GenericArgument::Type(err_ty)) =
-                                        args.args.get(1)
-                                    {
-                                        rust_type_to_wit(err_ty, used_types)?
-                                    } else {
-                                        // Should ideally not happen if len >= 2, but handle defensively
-                                        return Err(eyre!(
-                                            "Failed to parse Result second generic argument"
-                                        ));
-                                    }
-                                } else {
-                                    // Only one type arg provided (e.g., Rust Result<T>)
-                                    // Assume error type is empty tuple ()
-                                    "tuple<>".to_string()
-                                };
-
-                                let final_ok = if ok_type_str == "tuple<>" {
+                                // Map Rust's () (represented as "_") to WIT's _ in result<...>
+                                let final_ok = if ok_type_str == "_" {
+                                    // Check for "_"
                                     "_"
                                 } else {
                                     &ok_type_str
                                 };
-                                let final_err = if err_type_str == "tuple<>" {
+                                let final_err = if err_type_str == "_" {
+                                    // Check for "_"
                                     "_"
                                 } else {
                                     &err_type_str
                                 };
 
+                                // Format the WIT result string according to WIT conventions
                                 let result_string = match (final_ok, final_err) {
                                     ("_", "_") => "result".to_string(),          // Shorthand: result
                                     (ok, "_") => format!("result<{}>", ok), // Shorthand: result<T>
@@ -237,10 +229,14 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                                 };
                                 Ok(result_string)
                             } else {
-                                Err(eyre!("Failed to parse Result first generic argument"))
+                                // This case should be unlikely if len == 2, but handle defensively
+                                Err(eyre!("Failed to parse Result generic arguments"))
                             }
                         } else {
-                            Err(eyre!("Result requires at least one type argument in Rust"))
+                            Err(eyre!(
+                                "Result requires exactly two type arguments (e.g., Result<T, E>), found {}",
+                                args.args.len()
+                            ))
                         }
                     } else {
                         Err(eyre!("Failed to parse Result type arguments"))
@@ -286,11 +282,13 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
             // Handle references by using the underlying type
             rust_type_to_wit(&type_ref.elem, used_types)
         }
+        // fn () -> Result<(), Error>
+        // tuple<>
         Type::Tuple(type_tuple) => {
             if type_tuple.elems.is_empty() {
-                debug!("Empty tuple is tuple<> in WIT");
-                // Empty tuple is tuple<> in WIT
-                Ok("tuple<>".to_string())
+                // Represent () as "_" for the caller to interpret based on context.
+                // It's valid within Result<_, E>, but invalid as a direct return type.
+                Ok("_".to_string())
             } else {
                 // Create a tuple representation in WIT
                 let mut elem_types = Vec::new();
@@ -663,14 +661,16 @@ fn generate_signature_struct(
                     continue;
                 }
 
-                // Get original param name and convert to kebab-case
+                // Get original param name
                 let param_orig_name = pat_ident.ident.to_string();
+                let method_name_for_error = method.sig.ident.to_string(); // Get method name for error messages
 
                 // Validate parameter name
                 match validate_name(&param_orig_name, "Parameter") {
                     Ok(_) => {
-                        let param_name = check_and_strip_leading_underscore(param_orig_name);
-                        let param_name = to_kebab_case(&param_name);
+                        let stripped_param_name =
+                            check_and_strip_leading_underscore(param_orig_name.clone()); // Clone needed
+                        let param_name = to_kebab_case(&stripped_param_name);
 
                         // Rust type to WIT type
                         match rust_type_to_wit(&pat_type.ty, used_types) {
@@ -680,14 +680,20 @@ fn generate_signature_struct(
                                     .push(format!("        {}: {}", param_name, param_type));
                             }
                             Err(e) => {
-                                warn!(param_name = %param_name, error = %e, "Error converting parameter type");
-                                return Err(e);
+                                // Wrap parameter type conversion error with context
+                                return Err(e.wrap_err(format!(
+                                    "Failed to convert type for parameter '{}' in function '{}'",
+                                    param_orig_name, method_name_for_error
+                                )));
                             }
                         }
                     }
                     Err(e) => {
-                        warn!(error = %e, "Skipping parameter with invalid name");
-                        return Err(e);
+                        // Wrap invalid parameter name error with context
+                        return Err(e.wrap_err(format!(
+                            "Invalid name for parameter '{}' in function '{}'",
+                            param_orig_name, method_name_for_error
+                        )));
                     }
                 }
             }
@@ -698,20 +704,36 @@ fn generate_signature_struct(
     match &method.sig.output {
         syn::ReturnType::Type(_, ty) => match rust_type_to_wit(&*ty, used_types) {
             Ok(return_type) => {
+                // Check if the return type is "_", which signifies a standalone () return type.
+                if return_type == "_" {
+                    let method_name = method.sig.ident.to_string();
+                    bail!(
+                        "Function '{}' returns '()', which is not directly supported in WIT signatures. \
+                         Consider returning a Result<(), YourErrorType> or another meaningful type.",
+                        method_name
+                    );
+                }
+                // Add the valid return type field
                 struct_fields.push(format!("        returning: {}", return_type));
             }
             Err(e) => {
-                warn!(struct_name = %signature_struct_name, error = %e, "Error converting return type");
-                return Err(e);
+                // Propagate *other* errors from return type conversion, wrapping them.
+                let method_name = method.sig.ident.to_string();
+                return Err(e.wrap_err(format!(
+                    "Failed to convert return type for function '{}'",
+                    method_name
+                )));
             }
         },
         syn::ReturnType::Default => {
-            // This corresponds to -> () or no return type
-            // Use tuple<> for functions returning nothing (Rust unit type)
-            struct_fields.push("        returning: tuple<>".to_string());
+            // Functions exposed via WIT must have an explicit return type.
+            let method_name = method.sig.ident.to_string();
+            bail!(
+                "Function '{}' must have an explicit return type (e.g., '-> MyType' or '-> Result<(), YourErrorType>') to be exposed via WIT. Implicit return types are not allowed.",
+                method_name
+            );
         }
     }
-
     // Combine everything into a record definition
     let record_def = format!(
         "{}\n    record {} {{\n{}\n    }}",
@@ -880,7 +902,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                                 ) {
                                     Ok(remote_struct) => signature_structs.push(remote_struct),
                                     Err(e) => {
-                                        warn!(method_name = %method_name, error = %e, "Error generating remote signature struct");
+                                        // Error: Return the specific error from generate_signature_struct directly
+                                        return Err(e);
                                     }
                                 }
                             }
@@ -894,7 +917,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                                 ) {
                                     Ok(local_struct) => signature_structs.push(local_struct),
                                     Err(e) => {
-                                        warn!(method_name = %method_name, error = %e, "Error generating local signature struct");
+                                        // Error: Return the specific error from generate_signature_struct directly
+                                        return Err(e);
                                     }
                                 }
                             }
@@ -908,19 +932,25 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                                 ) {
                                     Ok(http_struct) => signature_structs.push(http_struct),
                                     Err(e) => {
-                                        warn!(method_name = %method_name, error = %e, "Error generating HTTP signature struct");
+                                        // Error: Return the specific error from generate_signature_struct directly
+                                        return Err(e);
                                     }
                                 }
                             }
                         }
                         Err(e) => {
-                            warn!("    Skipping method with invalid name: {}", e);
-                            warn!(method_name = %method_name, error = %e, "Skipping method with invalid name");
+                            return Err(e.wrap_err(format!(
+                                "Method: '{}' has invalid name, it should not include any numbers or the keyword 'stream'",
+                                method_name
+                            )));
                         }
                     }
                 } else {
-                    warn!("   Method {} does not have the [remote], [local], [http] or [init] attribute, it should not be in the Impl block", method_name);
-                    warn!(method_name = %method_name, "Method missing required attribute ([remote], [local], [http], or [init])");
+                    // Method lacks the required attributes, this is an error - Keep specific error message
+                    return Err(eyre!(
+                            "Method '{}' in the #[hyperprocess] impl block is missing a required attribute ([remote], [local], [http], or [init]). Only methods with these attributes should be included in this impl block.",
+                            method_name
+                        ));
                 }
             }
         }
