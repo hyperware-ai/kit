@@ -739,52 +739,52 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                 .find(|a| a.path().is_ident("hyperprocess"))
             {
                 debug!("Found #[hyperprocess] attribute");
-                match extract_wit_world(&[attr.clone()]) {
-                    Ok(world_name) => {
-                        debug!(wit_world = %world_name, "Extracted wit_world");
-                        wit_world = Some(world_name);
+                // Attempt to extract wit_world. Propagate error if extraction fails.
+                let world_name = extract_wit_world(&[attr.clone()])
+                    .wrap_err("Failed to extract wit_world from #[hyperprocess] attribute")?;
+                debug!(wit_world = %world_name, "Extracted wit_world");
+                wit_world = Some(world_name);
 
-                        // Get the struct name from the 'impl MyStruct for ...' part
-                        interface_name = impl_item.self_ty.as_ref().as_type_path().and_then(|tp| {
-                            tp.path.segments.last().map(|seg| seg.ident.to_string())
-                        });
 
-                        if let Some(ref name) = interface_name {
-                            // Validate original name first
-                            match validate_name(name, "Interface") {
-                                Ok(_) => {
-                                    let base_name = remove_state_suffix(name);
-                                    kebab_interface_name = Some(to_kebab_case(&base_name));
-                                    debug!(interface_name = %name, base_name = %base_name, kebab_name = ?kebab_interface_name, "Interface details");
-                                    impl_item_with_hyperprocess = Some(impl_item.clone());
-                                    break; // Found the target impl block
-                                }
-                                Err(e) => {
-                                    // Escalate errors for invalid interface names instead of just warning
-                                    return Err(e.wrap_err(format!(
-                                        "Invalid interface name '{}' in hyperprocess impl block",
-                                        name
-                                    )));
-                                }
-                            }
-                        } else {
-                            warn!("Could not extract interface name from hyperprocess impl block type");
-                            wit_world = None; // Reset world if name extraction failed
-                            continue;
+                // Get the struct name from the 'impl MyStruct for ...' part
+                interface_name = impl_item.self_ty.as_ref().as_type_path().and_then(|tp| {
+                    tp.path.segments.last().map(|seg| seg.ident.to_string())
+                });
+
+                if let Some(ref name) = interface_name {
+                    // Validate original name first
+                     match validate_name(name, "Interface") {
+                        Ok(_) => {
+                            let base_name = remove_state_suffix(name);
+                            kebab_interface_name = Some(to_kebab_case(&base_name));
+                            debug!(interface_name = %name, base_name = %base_name, kebab_name = ?kebab_interface_name, "Interface details");
+                            impl_item_with_hyperprocess = Some(impl_item.clone());
+                            break; // Found the target impl block
+                        }
+                        Err(e) => {
+                            // Escalate errors for invalid interface names instead of just warning
+                            return Err(e.wrap_err(format!("Invalid interface name '{}' in hyperprocess impl block", name)));
                         }
                     }
-                    Err(e) => warn!("Failed to extract wit_world from attribute: {}", e), // Continue searching if extraction fails
+                } else {
+                    // If interface name couldn't be extracted, it's an error for this project.
+                    bail!("Could not extract interface name from #[hyperprocess] impl block type: {:?}", impl_item.self_ty);
+
                 }
+
+
             }
         }
     }
 
     // Exit early if no valid hyperprocess impl block was identified
     let Some(ref impl_item) = impl_item_with_hyperprocess else {
-        warn!(project_path=%project_path.display(), "No valid #[hyperprocess] impl block found in lib.rs");
+        // If we looped through everything and didn't find a block (and didn't error above),
+        // it means no #[hyperprocess] attribute was found at all. This is okay, just skip.
+        warn!(project_path=%project_path.display(), "No #[hyperprocess] impl block found in lib.rs, skipping project");
         return Ok(None);
     };
-    // These unwraps are safe due to the check above and the logic ensuring they are set together
+    // These unwraps are safe due to the checks above ensuring we error or break successfully
     let kebab_name = kebab_interface_name.as_ref().unwrap();
     let current_wit_world = wit_world.as_ref().unwrap();
 
@@ -881,18 +881,18 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
         // Search across all project files for the definition
         for file_path in &rust_files {
-            match find_and_make_wit_type_def(file_path, &type_name_to_find, &mut global_used_types)
-            {
-                Ok(Some((wit_definition, new_local_deps))) => {
+            // Directly propagate errors from find_and_make_wit_type_def
+            match find_and_make_wit_type_def(file_path, &type_name_to_find, &mut global_used_types)? {
+                Some((wit_definition, new_local_deps)) => {
+
+
                     debug!(type_name=%type_name_to_find, file_path=%file_path.display(), "Found definition");
 
                     // Store the definition. Check for duplicates across files.
-                    if let Some(existing_def) =
-                        generated_type_defs.insert(type_name_to_find.clone(), wit_definition)
-                    {
-                        // Simple string comparison might be too strict if formatting differs slightly.
-                        // But good enough for a warning.
-                        if existing_def != *generated_type_defs.get(&type_name_to_find).unwrap() {
+                    if let Some(existing_def) = generated_type_defs.insert(type_name_to_find.clone(), wit_definition.clone()) { // Clone wit_definition here
+                         // Simple string comparison might be too strict if formatting differs slightly.
+                         // But good enough for a warning.
+                         if existing_def != wit_definition { // Compare with the cloned value
                             warn!(type_name = %type_name_to_find, "Type definition found in multiple files with different generated content. Using the one from: {}", file_path.display());
                         }
                     }
@@ -909,10 +909,9 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     // Found the definition for this type, stop searching files for it
                     break;
                 }
-                Ok(None) => continue, // Not in this file, check next file
-                Err(e) => {
-                    return Err(e); // <-- CHANGE IS HERE
-                }
+                None => continue, // Not in this file, check next file
+
+
             }
         }
         // If after checking all files, the definition wasn't found
@@ -957,12 +956,14 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     signature_structs.sort(); // Sort signature records as well
 
     if signature_structs.is_empty() && all_generated_defs.is_empty() {
-        warn!(interface_name = %interface_name.as_ref().unwrap(), "No attributed functions or used types found. No WIT interface file generated for this project.");
-        // No interface generated, but maybe the world file still needs creating/updating?
-        // Let's return None for the interface part, the main function handles world logic.
-        // We still need to return the world name though.
-        // Return None for interface means no `import` statement added later.
-        return Ok(None); // Indicate no interface content was generated
+        // Use the original interface name if available, otherwise fallback
+        let name_for_warning = interface_name.as_deref().unwrap_or("<unknown>");
+        warn!(interface_name = %name_for_warning, "No attributed functions or used types requiring definitions found. No WIT interface file generated for this project.");
+
+         // Return the world name even if no interface content is generated,
+         // so the world file can still be updated/created if necessary.
+         // But signal that no *interface* was generated by returning None for the interface name part.
+        return Ok(Some((String::new(), current_wit_world.to_string()))); // Return empty string for interface name
     } else {
         debug!(kebab_name=%kebab_name, "Generating final WIT content");
         let mut content = String::new();
@@ -1173,44 +1174,65 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
 
     // Process each project and collect world imports
     let mut new_imports = Vec::new();
-    let mut interfaces = Vec::new();
+    let mut interfaces = Vec::new(); // Kebab-case interface names
 
-    let mut wit_worlds = HashSet::new();
+    let mut wit_worlds = HashSet::new(); // Collect all unique world names encountered
     for project_path in &projects {
         match process_rust_project(project_path, api_dir) {
+            // Project processed successfully, yielding an interface name and world name
             Ok(Some((interface, wit_world))) => {
-                new_imports.push(format!("    import {interface};"));
-
-                interfaces.push(interface);
+                // Only add import if an interface name was actually generated
+                if !interface.is_empty() {
+                    new_imports.push(format!("    import {interface};"));
+                    interfaces.push(interface); // Add to list of generated interfaces
+                } else {
+                     // Log if processing succeeded but generated no interface content
+                     debug!(project = %project_path.display(), world = %wit_world, "Project processed but generated no interface content (only types/no functions?)");
+                }
+                // Always record the project path and the target world
                 processed_projects.push(project_path.clone());
-
                 wit_worlds.insert(wit_world);
             }
+            // Project was skipped intentionally (e.g., no lib.rs, no #[hyperprocess])
             Ok(None) => {
-                bail!(
-                    "No import statement generated for project {}",
-                    project_path.display()
-                );
+                debug!(project = %project_path.display(), "Project skipped during processing (e.g., no lib.rs or #[hyperprocess] found)");
+                // Continue to the next project
+                continue;
             }
+            // An error occurred during processing
             Err(e) => {
+                // Propagate the error, stopping the entire generation process
                 bail!("Error processing project {}: {}", project_path.display(), e);
             }
         }
     }
 
+
     debug!(count = %new_imports.len(), "Collected number of new imports");
+    if new_imports.is_empty() && wit_worlds.is_empty() {
+        info!("No WIT interfaces generated and no target WIT worlds identified across all projects.");
+        return Ok((processed_projects, interfaces)); // Return empty interfaces list
+    } else if new_imports.is_empty() {
+        info!("No new WIT interfaces generated, but target WIT world(s) identified: {:?}", wit_worlds);
+        // Proceed to rewrite world files even without new imports, as existing ones might need updates/creation.
+    }
 
-    // Check for existing world definition files and update them
-    debug!("Looking for existing world definition files");
-    let mut updated_world = false;
 
-    rewrite_wit(api_dir, &new_imports, &mut wit_worlds, &mut updated_world)?;
+    // Update or create WIT world files
+    debug!("Processing WIT world files for: {:?}", wit_worlds);
+    let mut updated_world = false; // Track if any world file was written/updated
 
-    // If no world definitions were found, create a default one
+
+    rewrite_wit(api_dir, &new_imports, &mut wit_worlds.clone(), &mut updated_world)?; // Pass a clone as rewrite_wit might modify it
+
+
+    // If no existing world matched and no new world files were created by rewrite_wit,
+    // AND we actually had imports to add, create a default world file.
     if !updated_world && !new_imports.is_empty() {
+
         // Define default world name
         let default_world = "async-app-template-dot-os-v0";
-        warn!(default_world = %default_world, "No existing world definitions found, creating default");
+        warn!(default_world = %default_world, "No existing world definitions found or created for collected imports, creating default world file");
 
         // Create world content with process-v1 include and proper indentation for imports
         let imports_with_indent: Vec<String> = new_imports
@@ -1231,12 +1253,12 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
             "include process-v1;"
         };
 
-        let world_content = format!(
-            "world {} {{\n{}\n    {}\n}}",
-            default_world,
-            imports_with_indent.join("\n"),
-            include_line
-        );
+        let mut includes = HashSet::new();
+        includes.insert(include_line.to_string());
+
+        // Generate content using the helper function
+        let world_content = generate_wit_file(default_world, &new_imports, &Vec::new(), &mut includes)?;
+
 
         let world_file = api_dir.join(format!("{}.wit", default_world));
         debug!(path = %world_file.display(), "Writing default world definition");
@@ -1249,8 +1271,12 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
         })?;
 
         debug!("Successfully created default world definition");
+        updated_world = true; // Mark that a world file was indeed created
+    } else if !updated_world {
+        info!("No world files were updated or created (either no imports needed adding, or target worlds already existed and were up-to-date).");
     }
 
-    info!("WIT files generated successfully in the 'api' directory.");
-    Ok((processed_projects, interfaces))
+
+    info!("WIT file generation process completed.");
+    Ok((processed_projects, interfaces)) // Return list of successfully processed projects and generated interfaces
 }
