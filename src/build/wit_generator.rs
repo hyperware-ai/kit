@@ -1234,24 +1234,12 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
         &mut updated_world,
     )?; // Pass a clone as rewrite_wit might modify it
 
-    // If no existing world matched and no new world files were created by rewrite_wit,
-    // AND we actually had imports to add, create a default world file.
+    // If no world file was updated/created yet AND we have imports, create a default one.
     if !updated_world && !new_imports.is_empty() {
         // Define default world name
         let default_world = "async-app-template-dot-os-v0";
         warn!(default_world = %default_world, "No existing world definitions found or created for collected imports, creating default world file");
 
-        // Create world content with process-v1 include and proper indentation for imports
-        let imports_with_indent: Vec<String> = new_imports
-            .iter()
-            .map(|import| {
-                if import.starts_with("    ") {
-                    import.clone()
-                } else {
-                    format!("    {}", import.trim())
-                }
-            })
-            .collect();
 
         // Determine include based on world name
         let include_line = if default_world.starts_with("types-") {
@@ -1279,8 +1267,10 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
 
         debug!("Successfully created default world definition");
         updated_world = true; // Mark that a world file was indeed created
-    } else if !updated_world {
-        info!("No world files were updated or created (either no imports needed adding, or target worlds already existed and were up-to-date).");
+    }
+    
+    if !updated_world {
+        info!("No world files were updated or created (either no imports needed adding, target worlds already existed/updated, or no default was needed).");
     }
 
     info!("WIT file generation process completed.");
