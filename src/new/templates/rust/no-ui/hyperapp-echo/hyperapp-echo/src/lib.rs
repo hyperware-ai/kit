@@ -1,6 +1,6 @@
 use serde::{Serialize, Deserialize};
 use hyperprocess_macro::hyperprocess;
-
+use hyperware_process_lib::println;
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct HyperappEchoState {}

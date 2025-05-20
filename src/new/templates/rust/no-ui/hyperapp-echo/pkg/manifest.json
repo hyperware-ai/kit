@@ -8,12 +8,14 @@
       "homepage:homepage:sys",
       "http-client:distro:sys",
       "http-server:distro:sys",
+      "terminal:terminal:sys",
       "vfs:distro:sys"
     ],
     "grant_capabilities": [
       "homepage:homepage:sys",
       "http-client:distro:sys",
       "http-server:distro:sys",
+      "terminal:terminal:sys",
       "vfs:distro:sys"
     ],
     "public": false
