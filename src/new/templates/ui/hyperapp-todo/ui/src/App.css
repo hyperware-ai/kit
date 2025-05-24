@@ -1,0 +1,172 @@
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+  width: 75%;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 1em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+/* --- Todo List Styles --- */
+
+.task-list {
+  list-style: none; /* Remove default bullet points */
+  padding: 0;
+  margin: 0;
+  text-align: left;
+}
+
+.task-item {
+  display: flex;
+  align-items: center;
+  padding: 0.8em 0.5em;
+  border-bottom: 1px solid #eee;
+  font-size: 1.1em;
+}
+
+.task-item:last-child {
+  border-bottom: none;
+}
+
+.task-item.completed .task-text {
+  text-decoration: line-through;
+  color: #888;
+}
+
+.task-text {
+  flex-grow: 1; /* Allow text to take up remaining space */
+  margin-left: 0.5em; /* Space between checkbox and text */
+}
+
+/* Keep input row styles */
+.input-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+
+.input-row > button {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding: 0.5em 1.2em;
+  background-color: #4b9ad8;
+  color: white;
+  font-weight: 600;
+  border: 1px solid #4b9ad8; /* Match border */
+  cursor: pointer;
+  height: calc(2em + 2px); /* Match input height (approx) */
+  box-sizing: border-box;
+}
+
+.input-row > button:hover {
+  background-color: #357abd;
+  border-color: #357abd;
+}
+
+.input-row > input {
+  border: 1px solid #ccc;
+  padding: 0.5em 0.8em;
+  font-size: 1em;
+  border-radius: 0.25em;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  width: 100%;
+  height: 2em; /* Define height */
+  box-sizing: border-box;
+}
+
+/* --- Existing Styles --- */
+
+/* Removed .message-list and related styles as they are replaced by .task-list */
+
+.node-not-connected {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(255, 255, 255, 0.9);
+  z-index: 1000;
+}
+
+.verification {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  margin-top: 0.5em;
+}
+
+.verify-button {
+  background-color: #4b9ad8;
+  border: none;
+  color: white;
+  padding: 0.5em 1em;
+  border-radius: 0.3em;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.verify-button:hover {
+  background-color: #357abd;
+}
+
+.verification-result {
+  font-size: 1.2em;
+  font-weight: bold;
+  padding: 0.2em 0.5em;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.verification-result.verified {
+  color: white;
+  background-color: #4caf50;
+}
+
+.verification-result.failed {
+  color: white;
+  background-color: #f44336;
+}
