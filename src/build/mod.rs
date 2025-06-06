@@ -40,7 +40,7 @@ const PACKAGE_JSON_NAME: &str = "package.json";
 const COMPONENTIZE_MJS_NAME: &str = "componentize.mjs";
 const HYPERWARE_WIT_1_0_0_URL: &str =
     "https://raw.githubusercontent.com/hyperware-ai/hyperware-wit/v1.0.0/hyperware.wit";
-const WASI_VERSION: &str = "27.0.0"; // TODO: un-hardcode
+const WASI_VERSION: &str = "33.0.0"; // TODO: un-hardcode
 const DEFAULT_WORLD_1_0_0: &str = "process-v1";
 const KINODE_PROCESS_LIB_CRATE_NAME: &str = "hyperware_process_lib";
 
