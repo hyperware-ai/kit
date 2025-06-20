@@ -344,32 +344,7 @@ pub fn check_foundry_deps() -> Result<Vec<Dependency>> {
     if !is_command_installed("anvil")? {
         return Ok(vec![Dependency::Foundry]);
     }
-    // let (_, installed_datetime) = get_foundry_version()?;
     Ok(vec![])
-}
-
-#[instrument(level = "trace", skip_all)]
-fn get_foundry_version() -> Result<(String, String)> {
-    let output = run_command(Command::new("bash").args(&["-c", "anvil --version"]), false)?;
-    let Some(output) = output else {
-        return Err(eyre!(
-            "failed to fetch foundry version: anvil --version failed"
-        ));
-    };
-    let output: Vec<&str> = output.0.split('(').nth(1).unwrap().split(' ').collect();
-    if output.len() != 2 {
-        return Err(eyre!(
-            "failed to fetch foundry version: unexpected output: {output:?}"
-        ));
-    }
-    Ok((
-        output[0].trim().to_string(),
-        output[1]
-            .trim()
-            .strip_suffix(')')
-            .unwrap_or_else(|| output[1])
-            .to_string(),
-    ))
 }
 
 /// install forge+anvil+others, could be separated into binary extractions from github releases.

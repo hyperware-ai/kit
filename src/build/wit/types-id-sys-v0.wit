@@ -1,0 +1,4 @@
+world types-id-sys-v0 {
+    import id;
+    include lib;
+}

@@ -1,0 +1,26 @@
+interface sign {
+    // This interface contains function signature definitions that will be used
+    // by the hyper-bindgen macro to generate async function bindings.
+    //
+    // NOTE: This is currently a hacky workaround since WIT async functions are not
+    // available until WASI Preview 3. Once Preview 3 is integrated into Hyperware,
+    // we should switch to using proper async WIT function signatures instead of
+    // this struct-based approach with hyper-bindgen generating the async stubs.
+
+    use standard.{address};
+
+    // Function signature for: sign (local)
+    record sign-signature-local {
+        target: address,
+        message: list<u8>,
+        returning: result<list<u8>, string>
+    }
+
+    // Function signature for: verify (local)
+    record verify-signature-local {
+        target: address,
+        message: list<u8>,
+        signature: list<u8>,
+        returning: result<bool, string>
+    }
+}
