@@ -33,6 +33,7 @@ mod rewrite;
 use rewrite::copy_and_rewrite_package;
 
 mod caller_utils_generator;
+mod caller_utils_ts_generator;
 mod wit_generator;
 
 const PY_VENV_NAME: &str = "process_env";
@@ -1814,6 +1815,11 @@ pub async fn execute(
         let api_dir = live_dir.join("api");
         let (processed_projects, interfaces) =
             wit_generator::generate_wit_files(&live_dir, &api_dir)?;
+
+        // generate ts bindings before building ui
+        let api_dir = live_dir.join("target").join("wit");
+        caller_utils_ts_generator::create_typescript_caller_utils(&live_dir, &api_dir)?;
+
         if interfaces.is_empty() {
             None
         } else {
