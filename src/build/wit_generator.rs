@@ -803,15 +803,21 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             let has_local = method.attrs.iter().any(|a| a.path().is_ident("local"));
             let has_http = method.attrs.iter().any(|a| a.path().is_ident("http"));
             let has_init = method.attrs.iter().any(|a| a.path().is_ident("init"));
+            let has_ws = method.attrs.iter().any(|a| a.path().is_ident("ws"));
 
-            if has_remote || has_local || has_http || has_init {
-                debug!(remote=%has_remote, local=%has_local, http=%has_http, init=%has_init, "Method attributes found");
+            if has_remote || has_local || has_http || has_init || has_ws {
+                debug!(remote=%has_remote, local=%has_local, http=%has_http, init=%has_init, ws=%has_ws, "Method attributes found");
                 // Validate original Rust function name
                 validate_name(&method_name, "Function")?; // Error early if name invalid
                 let func_kebab_name = to_kebab_case(&method_name);
 
                 if has_init {
                     debug!(method_name = %method_name, "Found [init] function, skipping signature generation");
+                    continue;
+                }
+
+                if has_ws {
+                    debug!(method_name = %method_name, "Found [ws] function, skipping signature generation (websocket handlers are ignored by WIT generator)");
                     continue;
                 }
 
@@ -847,7 +853,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             } else {
                 // Method in hyperprocess impl lacks required attribute - Error
                 return Err(eyre!(
-                         "Method '{}' in the #[hyperprocess] impl block is missing a required attribute ([remote], [local], [http], or [init]). Only methods with these attributes should be included.",
+                         "Method '{}' in the #[hyperprocess] impl block is missing a required attribute ([remote], [local], [http], [init], or [ws]). Only methods with these attributes should be included.",
                          method_name
                      ));
             }
