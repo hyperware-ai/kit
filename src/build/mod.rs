@@ -1817,7 +1817,6 @@ pub async fn execute(
             wit_generator::generate_wit_files(&live_dir, &api_dir)?;
 
         // generate ts bindings before building ui
-        let api_dir = live_dir.join("target").join("wit");
         caller_utils_ts_generator::create_typescript_caller_utils(&live_dir, &api_dir)?;
 
         if interfaces.is_empty() {

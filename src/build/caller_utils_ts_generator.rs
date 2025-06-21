@@ -338,7 +338,8 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
     let caller_utils_path = ui_target_dir.join("caller-utils.ts");
 
     debug!(
-        path = %caller_utils_path.display(),
+        api_dir = %api_dir.display(),
+        call_utils_path = %caller_utils_path.display(),
         "Creating TypeScript caller-utils"
     );
 
