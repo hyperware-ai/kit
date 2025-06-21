@@ -102,6 +102,22 @@ fn wit_type_to_typescript(wit_type: &str) -> String {
     }
 }
 
+// Extract the inner type from a Result type for function returns
+fn extract_result_ok_type(wit_type: &str) -> Option<String> {
+    if wit_type.starts_with("result<") {
+        let inner_part = &wit_type[7..wit_type.len() - 1];
+        if let Some(comma_pos) = inner_part.find(',') {
+            let ok_type = inner_part[..comma_pos].trim();
+            Some(wit_type_to_typescript(ok_type))
+        } else {
+            // Result with no error type
+            Some(wit_type_to_typescript(inner_part))
+        }
+    } else {
+        None
+    }
+}
+
 // Structure to represent a field in a WIT signature struct
 #[derive(Debug)]
 struct SignatureField {
@@ -213,7 +229,8 @@ fn generate_typescript_function(signature: &SignatureStruct) -> (String, String,
     let mut params = Vec::new();
     let mut param_names = Vec::new();
     let mut param_types = Vec::new();
-    let mut return_type = "void".to_string();
+    let mut full_return_type = "void".to_string();
+    let mut unwrapped_return_type = "void".to_string();
 
     for field in &signature.fields {
         let field_name_camel = to_camel_case(&field.name);
@@ -224,8 +241,14 @@ fn generate_typescript_function(signature: &SignatureStruct) -> (String, String,
             // Skip target field as it's handled internally
             continue;
         } else if field.name == "returning" {
-            return_type = ts_type;
-            debug!(return_type = %return_type, "Identified return type");
+            full_return_type = ts_type.clone();
+            // Check if it's a Result type and extract the Ok type
+            if let Some(ok_type) = extract_result_ok_type(&field.wit_type) {
+                unwrapped_return_type = ok_type;
+            } else {
+                unwrapped_return_type = ts_type;
+            }
+            debug!(return_type = %unwrapped_return_type, "Identified return type");
         } else {
             params.push(format!("{}: {}", field_name_camel, ts_type));
             param_names.push(field_name_camel);
@@ -256,10 +279,10 @@ fn generate_typescript_function(signature: &SignatureStruct) -> (String, String,
         )
     };
 
-    // Generate response type alias
+    // Generate response type alias (using the full Result type)
     let response_type = format!(
         "export type {}Response = {};",
-        pascal_function_name, return_type
+        pascal_function_name, full_return_type
     );
 
     // Generate function implementation
@@ -284,16 +307,17 @@ fn generate_typescript_function(signature: &SignatureStruct) -> (String, String,
         )
     };
 
+    // Function returns the unwrapped type since parseResultResponse extracts it
     let function_impl = format!(
-        "/**\n * {}\n{} * @returns Promise with result\n * @throws ApiError if the request fails\n */\nasync function {}({}): Promise<{}Response> {{\n{}\n\n  return await apiRequest<{}Request, {}Response>('{}', 'POST', data);\n}}",
+        "/**\n * {}\n{} * @returns Promise with result\n * @throws ApiError if the request fails\n */\nexport async function {}({}): Promise<{}> {{\n{}\n\n  return await apiRequest<{}Request, {}>('{}', 'POST', data);\n}}",
         camel_function_name,
         params.iter().map(|p| format!(" * @param {}", p)).collect::<Vec<_>>().join("\n"),
         camel_function_name,
         function_params,
-        pascal_function_name,
+        unwrapped_return_type,  // Use unwrapped type as the function return
         data_construction,
         pascal_function_name,
-        pascal_function_name,
+        unwrapped_return_type,  // Pass unwrapped type to apiRequest, not Response type
         camel_function_name
     );
 
@@ -453,15 +477,7 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
         ts_content.push_str("\n\n");
     }
 
-    // Add exports
-    if !function_names.is_empty() {
-        ts_content.push_str("// Export all API functions\n");
-        ts_content.push_str("export {\n");
-        for name in &function_names {
-            ts_content.push_str(&format!("  {},\n", name));
-        }
-        ts_content.push_str("};\n");
-    }
+    // No need for explicit exports since functions are already exported inline
 
     // Write the TypeScript file
     debug!(
