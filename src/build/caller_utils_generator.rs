@@ -745,147 +745,136 @@ crate-type = ["cdylib", "lib"]
     Ok(())
 }
 
+// Format a TOML dependency value into an inline table string
+fn format_toml_dependency(dep: &Value) -> Option<String> {
+    match dep {
+        Value::Table(table) => {
+            let fields = [
+                ("git", None),
+                ("rev", None),
+                ("branch", None),
+                ("tag", None),
+                ("version", None),
+                ("path", None),
+                (
+                    "features",
+                    Some(|v: &Value| -> Option<String> {
+                        Some(
+                            v.as_array()?
+                                .iter()
+                                .filter_map(|f| f.as_str())
+                                .map(|f| format!("\"{}\"", f))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    }),
+                ),
+            ];
+
+            let parts: Vec<String> = fields
+                .iter()
+                .filter_map(|(key, formatter)| {
+                    let value = table.get(*key)?;
+                    if let Some(format_fn) = formatter {
+                        Some(format!("{} = [{}]", key, format_fn(value)?))
+                    } else {
+                        Some(format!("{} = \"{}\"", key, value.as_str()?))
+                    }
+                })
+                .collect();
+
+            Some(format!("{{ {} }}", parts.join(", ")))
+        }
+        Value::String(s) => Some(format!("\"{}\"", s)),
+        _ => None,
+    }
+}
+
+// Read and parse a Cargo.toml file
+fn read_cargo_toml(path: &Path) -> Result<Value> {
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read Cargo.toml: {}", path.display()))?;
+    content
+        .parse()
+        .with_context(|| format!("Failed to parse Cargo.toml: {}", path.display()))
+}
+
 // Get hyperware_app_common dependency from the process Cargo.toml files
 #[instrument(level = "trace", skip_all)]
 fn get_hyperware_app_common_dependency(base_dir: &Path) -> Result<String> {
-    // First, read the workspace Cargo.toml to get the list of members
-    let workspace_cargo_toml_path = base_dir.join("Cargo.toml");
-    debug!(
-        path = %workspace_cargo_toml_path.display(),
-        "Reading workspace Cargo.toml to get members"
-    );
+    const DEFAULT_DEP: &str =
+        r#"{ git = "https://github.com/hyperware-ai/hyperprocess-macro", rev = "4c944b2" }"#;
 
-    let workspace_content = fs::read_to_string(&workspace_cargo_toml_path).with_context(|| {
-        format!(
-            "Failed to read workspace Cargo.toml: {}",
-            workspace_cargo_toml_path.display()
-        )
-    })?;
-
-    let workspace_toml: Value = workspace_content
-        .parse()
-        .with_context(|| "Failed to parse workspace Cargo.toml")?;
-
-    // Get workspace members
+    // Read workspace members
+    let workspace_toml = read_cargo_toml(&base_dir.join("Cargo.toml"))?;
     let members = workspace_toml
         .get("workspace")
         .and_then(|w| w.get("members"))
         .and_then(|m| m.as_array())
         .ok_or_else(|| eyre!("No workspace.members found in Cargo.toml"))?;
 
-    let mut found_dependencies = HashMap::new();
+    // Collect hyperware_app_common dependencies from all process members
+    let mut found_deps = HashMap::new();
 
-    // Check each member's Cargo.toml
-    for member in members {
-        if let Some(member_str) = member.as_str() {
-            // Skip generated directories like "target/"
-            if member_str.starts_with("target/") {
-                continue;
-            }
+    for member in members.iter().filter_map(|m| m.as_str()) {
+        // Skip generated directories
+        if member.starts_with("target/") {
+            continue;
+        }
 
-            let member_cargo_path = base_dir.join(member_str).join("Cargo.toml");
-            if !member_cargo_path.exists() {
-                debug!(
-                    "Member Cargo.toml not found: {}",
-                    member_cargo_path.display()
-                );
-                continue;
-            }
-
+        let member_cargo_path = base_dir.join(member).join("Cargo.toml");
+        if !member_cargo_path.exists() {
             debug!(
-                "Checking member: {} at {}",
-                member_str,
+                "Member Cargo.toml not found: {}",
                 member_cargo_path.display()
             );
+            continue;
+        }
 
-            let member_content = fs::read_to_string(&member_cargo_path).with_context(|| {
-                format!(
-                    "Failed to read member Cargo.toml: {}",
-                    member_cargo_path.display()
-                )
-            })?;
+        let member_toml = read_cargo_toml(&member_cargo_path)?;
 
-            let member_toml: Value = member_content.parse().with_context(|| {
-                format!(
-                    "Failed to parse member Cargo.toml: {}",
-                    member_cargo_path.display()
-                )
-            })?;
+        if let Some(dep) = member_toml
+            .get("dependencies")
+            .and_then(|d| d.get("hyperware_app_common"))
+            .and_then(format_toml_dependency)
+        {
+            debug!("Found hyperware_app_common in {}: {}", member, dep);
+            found_deps.insert(member.to_string(), dep);
+        }
+    }
 
-            // Look for hyperware_app_common in dependencies
-            if let Some(dependencies) = member_toml.get("dependencies") {
-                if let Some(hyperware_dep) = dependencies.get("hyperware_app_common") {
-                    let dep_str = if let Some(table) = hyperware_dep.as_table() {
-                        // Build inline table format manually
-                        let mut parts = vec![];
-                        if let Some(git) = table.get("git").and_then(|v| v.as_str()) {
-                            parts.push(format!("git = \"{}\"", git));
-                        }
-                        if let Some(rev) = table.get("rev").and_then(|v| v.as_str()) {
-                            parts.push(format!("rev = \"{}\"", rev));
-                        }
-                        if let Some(branch) = table.get("branch").and_then(|v| v.as_str()) {
-                            parts.push(format!("branch = \"{}\"", branch));
-                        }
-                        if let Some(tag) = table.get("tag").and_then(|v| v.as_str()) {
-                            parts.push(format!("tag = \"{}\"", tag));
-                        }
-                        if let Some(version) = table.get("version").and_then(|v| v.as_str()) {
-                            parts.push(format!("version = \"{}\"", version));
-                        }
-                        if let Some(path) = table.get("path").and_then(|v| v.as_str()) {
-                            parts.push(format!("path = \"{}\"", path));
-                        }
-                        if let Some(features) = table.get("features").and_then(|v| v.as_array()) {
-                            let features_str: Vec<String> = features
-                                .iter()
-                                .filter_map(|f| f.as_str())
-                                .map(|f| format!("\"{}\"", f))
-                                .collect();
-                            parts.push(format!("features = [{}]", features_str.join(", ")));
-                        }
-                        format!("{{ {} }}", parts.join(", "))
-                    } else if let Some(str_dep) = hyperware_dep.as_str() {
-                        format!("\"{}\"", str_dep)
-                    } else {
-                        continue;
-                    };
+    // Handle results
+    match found_deps.len() {
+        0 => {
+            warn!("No hyperware_app_common dependencies found in any process, using default");
+            Ok(DEFAULT_DEP.to_string())
+        }
+        1 => {
+            let dep = found_deps.values().next().unwrap();
+            info!("Using hyperware_app_common dependency: {}", dep);
+            Ok(dep.clone())
+        }
+        _ => {
+            // Ensure all dependencies match
+            let mut deps_iter = found_deps.values();
+            let first_dep = deps_iter.next().unwrap();
 
-                    debug!("Found hyperware_app_common in {}: {}", member_str, dep_str);
-                    found_dependencies.insert(member_str.to_string(), dep_str);
+            for dep in deps_iter {
+                if dep != first_dep {
+                    let (first_process, _) =
+                        found_deps.iter().find(|(_, d)| *d == first_dep).unwrap();
+                    let (conflict_process, _) = found_deps.iter().find(|(_, d)| *d == dep).unwrap();
+                    bail!(
+                        "Conflicting hyperware_app_common versions found:\n  Process '{}': {}\n  Process '{}': {}\nAll processes must use the same version.",
+                        first_process, first_dep, conflict_process, dep
+                    );
                 }
             }
+
+            info!("Using hyperware_app_common dependency: {}", first_dep);
+            Ok(first_dep.clone())
         }
     }
-
-    // Check that all found dependencies match
-    if found_dependencies.is_empty() {
-        // No dependencies found, use default
-        warn!("No hyperware_app_common dependencies found in any process, using default");
-        return Ok(
-            r#"{ git = "https://github.com/hyperware-ai/hyperprocess-macro", rev = "4c944b2" }"#
-                .to_string(),
-        );
-    }
-
-    let dep_values: Vec<_> = found_dependencies.values().collect();
-    let first_dep = dep_values[0];
-
-    // Check if all dependencies are the same
-    for (process, dep) in &found_dependencies {
-        if dep != first_dep {
-            bail!(
-                "Conflicting hyperware_app_common versions found:\n  Process '{}': {}\n  Process '{}': {}\nAll processes must use the same version.",
-                found_dependencies.keys().next().unwrap(),
-                first_dep,
-                process,
-                dep
-            );
-        }
-    }
-
-    info!("Using hyperware_app_common dependency: {}", first_dep);
-    Ok(first_dep.clone())
 }
 
 // Update workspace Cargo.toml to include the caller-utils crate
