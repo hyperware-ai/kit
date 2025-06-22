@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use color_eyre::{
-    eyre::{bail, WrapErr},
+    eyre::{bail, eyre, WrapErr},
     Result,
 };
 use tracing::{debug, info, instrument, warn};
@@ -507,8 +507,13 @@ fn create_caller_utils_crate(api_dir: &Path, base_dir: &Path) -> Result<()> {
     fs::create_dir_all(caller_utils_dir.join("src"))?;
     debug!("Created project directory structure");
 
+    // Get hyperware_app_common dependency from the process's Cargo.toml
+    let hyperware_dep = get_hyperware_app_common_dependency(base_dir)?;
+    debug!("Got hyperware_app_common dependency: {}", hyperware_dep);
+
     // Create Cargo.toml with updated dependencies
-    let cargo_toml = r#"[package]
+    let cargo_toml = format!(
+        r#"[package]
 name = "caller-utils"
 version = "0.1.0"
 edition = "2021"
@@ -518,17 +523,19 @@ publish = false
 anyhow = "1.0"
 process_macros = "0.1.0"
 futures-util = "0.3"
-serde = { version = "1.0", features = ["derive"] }
+serde = {{ version = "1.0", features = ["derive"] }}
 serde_json = "1.0"
-hyperware_app_common = { git = "https://github.com/hyperware-ai/hyperprocess-macro", rev = "4c944b2" }
+hyperware_app_common = {}
 once_cell = "1.20.2"
 futures = "0.3"
-uuid = { version = "1.0" }
+uuid = {{ version = "1.0" }}
 wit-bindgen = "0.41.0"
 
 [lib]
 crate-type = ["cdylib", "lib"]
-"#;
+"#,
+        hyperware_dep
+    );
 
     fs::write(caller_utils_dir.join("Cargo.toml"), cargo_toml)
         .with_context(|| "Failed to write caller-utils Cargo.toml")?;
@@ -736,6 +743,149 @@ crate-type = ["cdylib", "lib"]
     }
 
     Ok(())
+}
+
+// Get hyperware_app_common dependency from the process Cargo.toml files
+#[instrument(level = "trace", skip_all)]
+fn get_hyperware_app_common_dependency(base_dir: &Path) -> Result<String> {
+    // First, read the workspace Cargo.toml to get the list of members
+    let workspace_cargo_toml_path = base_dir.join("Cargo.toml");
+    debug!(
+        path = %workspace_cargo_toml_path.display(),
+        "Reading workspace Cargo.toml to get members"
+    );
+
+    let workspace_content = fs::read_to_string(&workspace_cargo_toml_path).with_context(|| {
+        format!(
+            "Failed to read workspace Cargo.toml: {}",
+            workspace_cargo_toml_path.display()
+        )
+    })?;
+
+    let workspace_toml: Value = workspace_content
+        .parse()
+        .with_context(|| "Failed to parse workspace Cargo.toml")?;
+
+    // Get workspace members
+    let members = workspace_toml
+        .get("workspace")
+        .and_then(|w| w.get("members"))
+        .and_then(|m| m.as_array())
+        .ok_or_else(|| eyre!("No workspace.members found in Cargo.toml"))?;
+
+    let mut found_dependencies = HashMap::new();
+
+    // Check each member's Cargo.toml
+    for member in members {
+        if let Some(member_str) = member.as_str() {
+            // Skip generated directories like "target/"
+            if member_str.starts_with("target/") {
+                continue;
+            }
+
+            let member_cargo_path = base_dir.join(member_str).join("Cargo.toml");
+            if !member_cargo_path.exists() {
+                debug!(
+                    "Member Cargo.toml not found: {}",
+                    member_cargo_path.display()
+                );
+                continue;
+            }
+
+            debug!(
+                "Checking member: {} at {}",
+                member_str,
+                member_cargo_path.display()
+            );
+
+            let member_content = fs::read_to_string(&member_cargo_path).with_context(|| {
+                format!(
+                    "Failed to read member Cargo.toml: {}",
+                    member_cargo_path.display()
+                )
+            })?;
+
+            let member_toml: Value = member_content.parse().with_context(|| {
+                format!(
+                    "Failed to parse member Cargo.toml: {}",
+                    member_cargo_path.display()
+                )
+            })?;
+
+            // Look for hyperware_app_common in dependencies
+            if let Some(dependencies) = member_toml.get("dependencies") {
+                if let Some(hyperware_dep) = dependencies.get("hyperware_app_common") {
+                    let dep_str = if let Some(table) = hyperware_dep.as_table() {
+                        // Build inline table format manually
+                        let mut parts = vec![];
+                        if let Some(git) = table.get("git").and_then(|v| v.as_str()) {
+                            parts.push(format!("git = \"{}\"", git));
+                        }
+                        if let Some(rev) = table.get("rev").and_then(|v| v.as_str()) {
+                            parts.push(format!("rev = \"{}\"", rev));
+                        }
+                        if let Some(branch) = table.get("branch").and_then(|v| v.as_str()) {
+                            parts.push(format!("branch = \"{}\"", branch));
+                        }
+                        if let Some(tag) = table.get("tag").and_then(|v| v.as_str()) {
+                            parts.push(format!("tag = \"{}\"", tag));
+                        }
+                        if let Some(version) = table.get("version").and_then(|v| v.as_str()) {
+                            parts.push(format!("version = \"{}\"", version));
+                        }
+                        if let Some(path) = table.get("path").and_then(|v| v.as_str()) {
+                            parts.push(format!("path = \"{}\"", path));
+                        }
+                        if let Some(features) = table.get("features").and_then(|v| v.as_array()) {
+                            let features_str: Vec<String> = features
+                                .iter()
+                                .filter_map(|f| f.as_str())
+                                .map(|f| format!("\"{}\"", f))
+                                .collect();
+                            parts.push(format!("features = [{}]", features_str.join(", ")));
+                        }
+                        format!("{{ {} }}", parts.join(", "))
+                    } else if let Some(str_dep) = hyperware_dep.as_str() {
+                        format!("\"{}\"", str_dep)
+                    } else {
+                        continue;
+                    };
+
+                    debug!("Found hyperware_app_common in {}: {}", member_str, dep_str);
+                    found_dependencies.insert(member_str.to_string(), dep_str);
+                }
+            }
+        }
+    }
+
+    // Check that all found dependencies match
+    if found_dependencies.is_empty() {
+        // No dependencies found, use default
+        warn!("No hyperware_app_common dependencies found in any process, using default");
+        return Ok(
+            r#"{ git = "https://github.com/hyperware-ai/hyperprocess-macro", rev = "4c944b2" }"#
+                .to_string(),
+        );
+    }
+
+    let dep_values: Vec<_> = found_dependencies.values().collect();
+    let first_dep = dep_values[0];
+
+    // Check if all dependencies are the same
+    for (process, dep) in &found_dependencies {
+        if dep != first_dep {
+            bail!(
+                "Conflicting hyperware_app_common versions found:\n  Process '{}': {}\n  Process '{}': {}\nAll processes must use the same version.",
+                found_dependencies.keys().next().unwrap(),
+                first_dep,
+                process,
+                dep
+            );
+        }
+    }
+
+    info!("Using hyperware_app_common dependency: {}", first_dep);
+    Ok(first_dep.clone())
 }
 
 // Update workspace Cargo.toml to include the caller-utils crate
