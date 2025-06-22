@@ -765,7 +765,7 @@ fn format_toml_dependency(dep: &Value) -> Option<String> {
                                 .filter_map(|f| f.as_str())
                                 .map(|f| format!("\"{}\"", f))
                                 .collect::<Vec<_>>()
-                                .join(", ")
+                                .join(", "),
                         )
                     }),
                 ),
