@@ -236,7 +236,8 @@ pub async fn execute(package_dir: &Path, url: &str) -> Result<()> {
             .map_err(|e| {
                 let e_string = e.to_string();
                 if e_string.contains("Failed with status code:") {
-                    eyre!("{}\ncheck logs (default at {}) for full http response\n\nhint: is Kinode running at url {}?", e_string, KIT_LOG_PATH_DEFAULT, url)
+                    eyre!("{e_string}\ncheck logs (default at {KIT_LOG_PATH_DEFAULT}) for full http response")
+                        .with_suggestion(|| "is Hyperdrive running with `--expose-local` at url {url}?")
                 } else {
                     eyre!(e_string)
                 }
