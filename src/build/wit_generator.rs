@@ -575,10 +575,31 @@ fn generate_signature_struct(
     let signature_struct_name = format!("{}-signature-{}", kebab_name, attr_type);
 
     // Generate comment for this specific function
-    let comment = format!(
+    let mut comment = format!(
         "    // Function signature for: {} ({})",
         kebab_name, attr_type
     );
+
+    // For HTTP endpoints, try to extract method and path from attribute
+    let mut has_explicit_path = false;
+    if attr_type == "http" {
+        if let Some((http_method, http_path)) = extract_http_info(&method.attrs)? {
+            comment.push_str(&format!("\n    // HTTP: {} {}", http_method, http_path));
+            // Check if path was explicitly defined (not just defaulted)
+            has_explicit_path = method.attrs.iter().any(|attr| {
+                if attr.path().is_ident("http") {
+                    let attr_str = format!("{:?}", attr);
+                    attr_str.contains("path")
+                }
+                else {
+                    false
+                }
+            });
+        } else {
+            // Default path if not specified
+            comment.push_str(&format!("\n    // HTTP: POST /api/{}", kebab_name));
+        }
+    }
 
     // Create struct fields that directly represent function parameters
     let mut struct_fields = Vec::new();
@@ -591,6 +612,9 @@ fn generate_signature_struct(
         struct_fields.push("        target: address".to_string());
     }
 
+    // Count non-self parameters
+    let mut param_count = 0;
+    
     // Process function parameters (skip &self and &mut self)
     for arg in &method.sig.inputs {
         if let syn::FnArg::Typed(pat_type) = arg {
@@ -599,6 +623,8 @@ fn generate_signature_struct(
                 if pat_ident.ident == "self" {
                     continue;
                 }
+
+                param_count += 1;
 
                 // Get original param name
                 let param_orig_name = pat_ident.ident.to_string();
@@ -634,6 +660,33 @@ fn generate_signature_struct(
                 }
             }
         }
+    }
+
+    // Validate parameter requirements
+    if param_count == 0 && attr_type == "http" && !has_explicit_path {
+        let method_name = method.sig.ident.to_string();
+        bail!(
+            "\n\nERROR: HTTP handler '{}' is missing required configuration!\n\
+            \n\
+            HTTP handlers must EITHER:\n\
+            1. Have at least one parameter (beyond &self/&mut self), OR\n\
+            2. Define an explicit path in the attribute\n\
+            \n\
+            Examples of valid HTTP handlers:\n\
+            \n\
+            // Option 1: Handler with parameter (path will be /api/{})\n\
+            #[http]\n\
+            fn {}(&mut self, request: Request) -> Response {{ ... }}\n\
+            \n\
+            // Option 2: Handler with explicit path (no parameters needed)\n\
+            #[http(path = \"/api/status\")]\n\
+            fn {}(&mut self) -> Response {{ ... }}\n\
+            \n\
+            // Option 3: Handler with method and path\n\
+            #[http(method = \"GET\", path = \"/api/users\")]\n\
+            fn {}(&mut self) -> Vec<User> {{ ... }}\n",
+            method_name, method_name, method_name, method_name, method_name
+        );
     }
 
     // Add return type field
@@ -679,6 +732,57 @@ fn generate_signature_struct(
     );
 
     Ok(record_def)
+}
+
+// Helper function to extract HTTP method and path from [http] attribute
+#[instrument(level = "trace", skip_all)]
+fn extract_http_info(attrs: &[Attribute]) -> Result<Option<(String, String)>> {
+    for attr in attrs {
+        if attr.path().is_ident("http") {
+            // Convert attribute to string representation for parsing
+            let attr_str = format!("{:?}", attr);
+            debug!(attr_str = %attr_str, "HTTP attribute string");
+
+            let mut method = None;
+            let mut path = None;
+
+            // Look for method parameter
+            if let Some(method_pos) = attr_str.find("method") {
+                if let Some(eq_pos) = attr_str[method_pos..].find('=') {
+                    let start_pos = method_pos + eq_pos + 1;
+                    // Find the quoted value
+                    if let Some(quote_start) = attr_str[start_pos..].find('"') {
+                        let value_start = start_pos + quote_start + 1;
+                        if let Some(quote_end) = attr_str[value_start..].find('"') {
+                            method = Some(attr_str[value_start..value_start + quote_end].to_string());
+                        }
+                    }
+                }
+            }
+
+            // Look for path parameter
+            if let Some(path_pos) = attr_str.find("path") {
+                if let Some(eq_pos) = attr_str[path_pos..].find('=') {
+                    let start_pos = path_pos + eq_pos + 1;
+                    // Find the quoted value
+                    if let Some(quote_start) = attr_str[start_pos..].find('"') {
+                        let value_start = start_pos + quote_start + 1;
+                        if let Some(quote_end) = attr_str[value_start..].find('"') {
+                            path = Some(attr_str[value_start..value_start + quote_end].to_string());
+                        }
+                    }
+                }
+            }
+
+            // If we found at least one parameter, return the info
+            if method.is_some() || path.is_some() {
+                let final_method = method.unwrap_or_else(|| "POST".to_string());
+                let final_path = path.unwrap_or_else(|| "/api".to_string());
+                return Ok(Some((final_method, final_path)));
+            }
+        }
+    }
+    Ok(None)
 }
 
 // Helper trait to get TypePath from Type
