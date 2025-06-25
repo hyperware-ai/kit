@@ -133,15 +133,38 @@ struct SignatureStruct {
     fields: Vec<SignatureField>,
 }
 
-// Parse WIT file to extract function signatures
+// Structure to represent a WIT record
+#[derive(Debug)]
+struct WitRecord {
+    name: String,
+    fields: Vec<SignatureField>,
+}
+
+// Structure to represent a WIT variant
+#[derive(Debug)]
+struct WitVariant {
+    name: String,
+    cases: Vec<String>,
+}
+
+// Structure to hold all parsed WIT types
+struct WitTypes {
+    signatures: Vec<SignatureStruct>,
+    records: Vec<WitRecord>,
+    variants: Vec<WitVariant>,
+}
+
+// Parse WIT file to extract function signatures, records, and variants
 #[instrument(level = "trace", skip_all)]
-fn parse_wit_file(file_path: &Path) -> Result<Vec<SignatureStruct>> {
+fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
     debug!(file = %file_path.display(), "Parsing WIT file");
 
     let content = fs::read_to_string(file_path)
         .with_context(|| format!("Failed to read WIT file: {}", file_path.display()))?;
 
     let mut signatures = Vec::new();
+    let mut records = Vec::new();
+    let mut variants = Vec::new();
 
     // Simple parser for WIT files to extract record definitions
     let lines: Vec<_> = content.lines().collect();
@@ -150,59 +173,134 @@ fn parse_wit_file(file_path: &Path) -> Result<Vec<SignatureStruct>> {
     while i < lines.len() {
         let line = lines[i].trim();
 
-        // Look for signature record definitions
-        if line.starts_with("record ") && line.contains("-signature-") {
+        // Look for record definitions
+        if line.starts_with("record ") {
             let record_name = line
                 .trim_start_matches("record ")
                 .trim_end_matches(" {")
                 .trim();
-            debug!(name = %record_name, "Found signature record");
+            
+            if record_name.contains("-signature-") {
+                // This is a signature record
+                debug!(name = %record_name, "Found signature record");
 
-            // Extract function name and attribute type
-            let parts: Vec<_> = record_name.split("-signature-").collect();
-            if parts.len() != 2 {
-                warn!(name = %record_name, "Unexpected signature record name format, skipping");
-                i += 1;
-                continue;
-            }
-
-            let function_name = parts[0].to_string();
-            let attr_type = parts[1].to_string();
-            debug!(function = %function_name, attr_type = %attr_type, "Extracted function name and type");
-
-            // Parse fields
-            let mut fields = Vec::new();
-            i += 1;
-
-            while i < lines.len() && !lines[i].trim().starts_with("}") {
-                let field_line = lines[i].trim();
-
-                // Skip comments and empty lines
-                if field_line.starts_with("//") || field_line.is_empty() {
+                // Extract function name and attribute type
+                let parts: Vec<_> = record_name.split("-signature-").collect();
+                if parts.len() != 2 {
+                    warn!(name = %record_name, "Unexpected signature record name format, skipping");
                     i += 1;
                     continue;
                 }
 
-                // Parse field definition
-                let field_parts: Vec<_> = field_line.split(':').collect();
-                if field_parts.len() == 2 {
-                    let field_name = field_parts[0].trim().to_string();
-                    let field_type = field_parts[1].trim().trim_end_matches(',').to_string();
+                let function_name = parts[0].to_string();
+                let attr_type = parts[1].to_string();
+                debug!(function = %function_name, attr_type = %attr_type, "Extracted function name and type");
 
-                    debug!(name = %field_name, wit_type = %field_type, "Found field");
-                    fields.push(SignatureField {
-                        name: field_name,
-                        wit_type: field_type,
-                    });
+                // Parse fields
+                let mut fields = Vec::new();
+                i += 1;
+
+                while i < lines.len() && !lines[i].trim().starts_with("}") {
+                    let field_line = lines[i].trim();
+
+                    // Skip comments and empty lines
+                    if field_line.starts_with("//") || field_line.is_empty() {
+                        i += 1;
+                        continue;
+                    }
+
+                    // Parse field definition
+                    let field_parts: Vec<_> = field_line.split(':').collect();
+                    if field_parts.len() == 2 {
+                        let field_name = field_parts[0].trim().to_string();
+                        let field_type = field_parts[1].trim().trim_end_matches(',').to_string();
+
+                        debug!(name = %field_name, wit_type = %field_type, "Found field");
+                        fields.push(SignatureField {
+                            name: field_name,
+                            wit_type: field_type,
+                        });
+                    }
+
+                    i += 1;
                 }
+
+                signatures.push(SignatureStruct {
+                    function_name,
+                    attr_type,
+                    fields,
+                });
+            } else {
+                // This is a regular record
+                debug!(name = %record_name, "Found record");
+
+                // Parse fields
+                let mut fields = Vec::new();
+                i += 1;
+
+                while i < lines.len() && !lines[i].trim().starts_with("}") {
+                    let field_line = lines[i].trim();
+
+                    // Skip comments and empty lines
+                    if field_line.starts_with("//") || field_line.is_empty() {
+                        i += 1;
+                        continue;
+                    }
+
+                    // Parse field definition
+                    let field_parts: Vec<_> = field_line.split(':').collect();
+                    if field_parts.len() == 2 {
+                        let field_name = field_parts[0].trim().to_string();
+                        let field_type = field_parts[1].trim().trim_end_matches(',').to_string();
+
+                        debug!(name = %field_name, wit_type = %field_type, "Found field");
+                        fields.push(SignatureField {
+                            name: field_name,
+                            wit_type: field_type,
+                        });
+                    }
+
+                    i += 1;
+                }
+
+                records.push(WitRecord {
+                    name: record_name.to_string(),
+                    fields,
+                });
+            }
+        }
+        // Look for variant definitions
+        else if line.starts_with("variant ") {
+            let variant_name = line
+                .trim_start_matches("variant ")
+                .trim_end_matches(" {")
+                .trim();
+            debug!(name = %variant_name, "Found variant");
+
+            // Parse cases
+            let mut cases = Vec::new();
+            i += 1;
+
+            while i < lines.len() && !lines[i].trim().starts_with("}") {
+                let case_line = lines[i].trim();
+
+                // Skip comments and empty lines
+                if case_line.starts_with("//") || case_line.is_empty() {
+                    i += 1;
+                    continue;
+                }
+
+                // Parse case - just the name, ignoring any associated data for now
+                let case_name = case_line.trim_end_matches(',').to_string();
+                debug!(case = %case_name, "Found variant case");
+                cases.push(case_name);
 
                 i += 1;
             }
 
-            signatures.push(SignatureStruct {
-                function_name,
-                attr_type,
-                fields,
+            variants.push(WitVariant {
+                name: variant_name.to_string(),
+                cases,
             });
         }
 
@@ -212,9 +310,49 @@ fn parse_wit_file(file_path: &Path) -> Result<Vec<SignatureStruct>> {
     debug!(
         file = %file_path.display(),
         signatures = signatures.len(),
+        records = records.len(),
+        variants = variants.len(),
         "Finished parsing WIT file"
     );
-    Ok(signatures)
+    Ok(WitTypes {
+        signatures,
+        records,
+        variants,
+    })
+}
+
+// Generate TypeScript interface from a WIT record
+fn generate_typescript_interface(record: &WitRecord) -> String {
+    let interface_name = to_pascal_case(&record.name);
+    let mut fields = Vec::new();
+
+    for field in &record.fields {
+        let field_name = to_camel_case(&field.name);
+        let ts_type = wit_type_to_typescript(&field.wit_type);
+        fields.push(format!("  {}: {};", field_name, ts_type));
+    }
+
+    format!(
+        "export interface {} {{\n{}\n}}",
+        interface_name,
+        fields.join("\n")
+    )
+}
+
+// Generate TypeScript type from a WIT variant
+fn generate_typescript_variant(variant: &WitVariant) -> String {
+    let type_name = to_pascal_case(&variant.name);
+    let cases: Vec<String> = variant
+        .cases
+        .iter()
+        .map(|case| format!("\"{}\"", to_pascal_case(case)))
+        .collect();
+
+    format!(
+        "export type {} = {};",
+        type_name,
+        cases.join(" | ")
+    )
 }
 
 // Generate TypeScript interface and function from a signature struct
@@ -430,12 +568,25 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
     let mut all_types = Vec::new();
     let mut all_functions = Vec::new();
     let mut function_names = Vec::new();
+    let mut custom_types = Vec::new();  // For records and variants
 
     // Generate content for each WIT file
     for wit_file in &wit_files {
         match parse_wit_file(wit_file) {
-            Ok(signatures) => {
-                for signature in signatures {
+            Ok(wit_types) => {
+                // Process custom types (records and variants)
+                for record in &wit_types.records {
+                    let interface_def = generate_typescript_interface(record);
+                    custom_types.push(interface_def);
+                }
+                
+                for variant in &wit_types.variants {
+                    let type_def = generate_typescript_variant(variant);
+                    custom_types.push(type_def);
+                }
+
+                // Process function signatures
+                for signature in &wit_types.signatures {
                     let (interface_def, type_def, function_def) =
                         generate_typescript_function(&signature);
 
@@ -462,6 +613,13 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
     // Create directories only after we know we have HTTP functions
     fs::create_dir_all(&ui_target_dir)?;
     debug!("Created UI target directory structure");
+
+    // Add custom types (records and variants) first
+    if !custom_types.is_empty() {
+        ts_content.push_str("\n// Custom Types from WIT definitions\n\n");
+        ts_content.push_str(&custom_types.join("\n\n"));
+        ts_content.push_str("\n\n");
+    }
 
     // Add all collected definitions
     if !all_interfaces.is_empty() {
