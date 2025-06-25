@@ -612,9 +612,6 @@ fn generate_signature_struct(
         struct_fields.push("        target: address".to_string());
     }
 
-    // Count non-self parameters
-    let mut param_count = 0;
-    
     // Process function parameters (skip &self and &mut self)
     for arg in &method.sig.inputs {
         if let syn::FnArg::Typed(pat_type) = arg {
@@ -623,8 +620,6 @@ fn generate_signature_struct(
                 if pat_ident.ident == "self" {
                     continue;
                 }
-
-                param_count += 1;
 
                 // Get original param name
                 let param_orig_name = pat_ident.ident.to_string();
