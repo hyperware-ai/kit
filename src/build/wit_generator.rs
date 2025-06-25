@@ -590,8 +590,7 @@ fn generate_signature_struct(
                 if attr.path().is_ident("http") {
                     let attr_str = format!("{:?}", attr);
                     attr_str.contains("path")
-                }
-                else {
+                } else {
                     false
                 }
             });
@@ -724,7 +723,8 @@ fn extract_http_info(attrs: &[Attribute]) -> Result<Option<(String, String)>> {
                     if let Some(quote_start) = attr_str[start_pos..].find('"') {
                         let value_start = start_pos + quote_start + 1;
                         if let Some(quote_end) = attr_str[value_start..].find('"') {
-                            method = Some(attr_str[value_start..value_start + quote_end].to_string());
+                            method =
+                                Some(attr_str[value_start..value_start + quote_end].to_string());
                         }
                     }
                 }
