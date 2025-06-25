@@ -662,32 +662,7 @@ fn generate_signature_struct(
         }
     }
 
-    // Validate parameter requirements
-    if param_count == 0 && attr_type == "http" && !has_explicit_path {
-        let method_name = method.sig.ident.to_string();
-        bail!(
-            "\n\nERROR: HTTP handler '{}' is missing required configuration!\n\
-            \n\
-            HTTP handlers must EITHER:\n\
-            1. Have at least one parameter (beyond &self/&mut self), OR\n\
-            2. Define an explicit path in the attribute\n\
-            \n\
-            Examples of valid HTTP handlers:\n\
-            \n\
-            // Option 1: Handler with parameter (path will be /api/{})\n\
-            #[http]\n\
-            fn {}(&mut self, request: Request) -> Response {{ ... }}\n\
-            \n\
-            // Option 2: Handler with explicit path (no parameters needed)\n\
-            #[http(path = \"/api/status\")]\n\
-            fn {}(&mut self) -> Response {{ ... }}\n\
-            \n\
-            // Option 3: Handler with method and path\n\
-            #[http(method = \"GET\", path = \"/api/users\")]\n\
-            fn {}(&mut self) -> Vec<User> {{ ... }}\n",
-            method_name, method_name, method_name, method_name, method_name
-        );
-    }
+    // HTTP handlers no longer require parameters - they can have zero parameters
 
     // Add return type field
     match &method.sig.output {
