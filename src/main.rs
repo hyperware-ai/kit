@@ -153,6 +153,10 @@ async fn execute(
             let is_persist = matches.get_one::<bool>("PERSIST").unwrap();
             let release = matches.get_one::<bool>("RELEASE").unwrap();
             let verbosity = matches.get_one::<u8>("VERBOSITY").unwrap();
+            let args = matches
+                .get_one::<String>("ARGS")
+                .map(|s| s.split_whitespace().map(String::from).collect())
+                .unwrap_or_else(|| vec![]);
 
             println!("boot_fake_node: {runtime_path:?}");
             boot_fake_node::execute(
@@ -167,7 +171,7 @@ async fn execute(
                 *is_persist,
                 *release,
                 *verbosity,
-                vec![],
+                args,
             )
             .await
         }
@@ -184,6 +188,10 @@ async fn execute(
             // let password = matches.get_one::<String>("PASSWORD").unwrap(); // TODO: with develop 0.8.0
             let release = matches.get_one::<bool>("RELEASE").unwrap();
             let verbosity = matches.get_one::<u8>("VERBOSITY").unwrap();
+            let args = matches
+                .get_one::<String>("ARGS")
+                .map(|s| s.split_whitespace().map(String::from).collect())
+                .unwrap_or_else(|| vec![]);
 
             boot_real_node::execute(
                 runtime_path,
@@ -194,7 +202,7 @@ async fn execute(
                 // password, // TODO: with develop 0.8.0
                 *release,
                 *verbosity,
-                vec![],
+                args,
             )
             .await
         }
@@ -606,6 +614,13 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .default_value("0")
                 .value_parser(value_parser!(u8))
             )
+            .arg(Arg::new("ARGS")
+                .action(ArgAction::Set)
+                .short('a')
+                .long("args")
+                .help("Additional arguments to pass to the node")
+                .required(false)
+            )
         )
         .subcommand(Command::new("boot-real-node")
             .about("Boot a real node")
@@ -676,6 +691,13 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .help("Verbosity of node: higher is more verbose")
                 .default_value("0")
                 .value_parser(value_parser!(u8))
+            )
+            .arg(Arg::new("ARGS")
+                .action(ArgAction::Set)
+                .short('a')
+                .long("args")
+                .help("Additional arguments to pass to the node")
+                .required(false)
             )
         )
         .subcommand(Command::new("build")
