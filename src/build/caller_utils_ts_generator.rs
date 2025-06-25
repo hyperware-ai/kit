@@ -179,7 +179,7 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                 .trim_start_matches("record ")
                 .trim_end_matches(" {")
                 .trim();
-            
+
             if record_name.contains("-signature-") {
                 // This is a signature record
                 debug!(name = %record_name, "Found signature record");
@@ -348,11 +348,7 @@ fn generate_typescript_variant(variant: &WitVariant) -> String {
         .map(|case| format!("\"{}\"", to_pascal_case(case)))
         .collect();
 
-    format!(
-        "export type {} = {};",
-        type_name,
-        cases.join(" | ")
-    )
+    format!("export type {} = {};", type_name, cases.join(" | "))
 }
 
 // Generate TypeScript interface and function from a signature struct
@@ -568,7 +564,7 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
     let mut all_types = Vec::new();
     let mut all_functions = Vec::new();
     let mut function_names = Vec::new();
-    let mut custom_types = Vec::new();  // For records and variants
+    let mut custom_types = Vec::new(); // For records and variants
 
     // Generate content for each WIT file
     for wit_file in &wit_files {
@@ -579,7 +575,7 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
                     let interface_def = generate_typescript_interface(record);
                     custom_types.push(interface_def);
                 }
-                
+
                 for variant in &wit_types.variants {
                     let type_def = generate_typescript_variant(variant);
                     custom_types.push(type_def);
