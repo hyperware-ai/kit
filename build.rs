@@ -50,7 +50,10 @@ fn visit_dirs(dir: &Path, output_buffer: &mut Vec<u8>) -> io::Result<()> {
         let path = entry.path();
         if path.is_dir() {
             let dir_name = path.file_name().and_then(|s| s.to_str());
-            if dir_name == Some("home") || dir_name == Some("target") {
+            if dir_name == Some("home")
+                || dir_name == Some("target")
+                || dir_name == Some(".mypy_cache")
+            {
                 continue;
             }
             visit_dirs(&path, output_buffer)?;
@@ -106,6 +109,9 @@ fn add_branch_name(repo: &git2::Repository) -> anyhow::Result<()> {
 }
 
 fn main() -> anyhow::Result<()> {
+    // Always run this script
+    println!("cargo:rerun-if-changed=NULL");
+
     make_new_includes()?;
 
     // write version info into binary

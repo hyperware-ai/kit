@@ -1,18 +1,24 @@
-use crate::hyperware::process::chat::{ChatMessage, Request as ChatRequest, Response as ChatResponse, SendRequest};
-use crate::hyperware::process::tester::{Request as TesterRequest, Response as TesterResponse, RunRequest, FailResponse};
+use crate::hyperware::process::chat::{
+    ChatMessage, Request as ChatRequest, Response as ChatResponse, SendRequest,
+};
+use crate::hyperware::process::tester::{
+    FailResponse, Request as TesterRequest, Response as TesterResponse, RunRequest,
+};
 
-use hyperware_process_lib::{await_message, call_init, print_to_terminal, println, Address, ProcessId, Request, Response};
+use hyperware_process_lib::{
+    await_message, call_init, print_to_terminal, println, Address, ProcessId, Request, Response,
+};
 
 mod tester_lib;
 
 wit_bindgen::generate!({
-    path: "target/wit",
+    path: "../target/wit",
     world: "chat-test-template-dot-os-v0",
     generate_unused_types: true,
     additional_derives: [PartialEq, serde::Deserialize, serde::Serialize, process_macros::SerdeJsonInto],
 });
 
-fn handle_message (our: &Address) -> anyhow::Result<()> {
+fn handle_message(our: &Address) -> anyhow::Result<()> {
     let message = await_message().unwrap();
 
     if !message.is_request() {
@@ -60,15 +66,19 @@ fn handle_message (our: &Address) -> anyhow::Result<()> {
             target: node_names[1].clone(),
             message: message.clone(),
         }))
-        .send_and_await_response(15)?.unwrap();
+        .send_and_await_response(15)?
+        .unwrap();
 
     // Get history from receiver & test
     print_to_terminal(0, "chat_test: c");
     let response = Request::new()
         .target(their_chat_address.clone())
         .body(ChatRequest::History(our.node.clone()))
-        .send_and_await_response(15)?.unwrap();
-    if response.is_request() { fail!("chat_test"); };
+        .send_and_await_response(15)?
+        .unwrap();
+    if response.is_request() {
+        fail!("chat_test");
+    };
     let ChatResponse::History(messages) = response.body().try_into()? else {
         fail!("chat_test");
     };
@@ -96,12 +106,12 @@ fn init(our: Address) {
 
     loop {
         match handle_message(&our) {
-            Ok(()) => {},
+            Ok(()) => {}
             Err(e) => {
                 print_to_terminal(0, format!("chat_test: error: {e:?}").as_str());
 
                 fail!("chat_test");
-            },
+            }
         };
     }
 }

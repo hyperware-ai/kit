@@ -405,6 +405,7 @@ pub fn run_runtime(
         format!("{port}"),
         "--verbosity".into(),
         format!("{verbosity}"),
+        "--expose-local".into(),
     ];
 
     if !args.is_empty() {

@@ -283,12 +283,12 @@ pub fn execute(
     if !is_hypermap_safe(&package_name, false) {
         let error = if !is_from_dir {
             eyre!(
-                "`package_name` '{}' must be Kimap safe (a-z, 0-9, - allowed).",
+                "`package_name` '{}' must be Hypermap safe (a-z, 0-9, - allowed).",
                 package_name
             )
         } else {
             eyre!(
-                "`package_name` (derived from given directory {:?}) '{}' must be Kimap safe (a-z, 0-9, - allowed).",
+                "`package_name` (derived from given directory {:?}) '{}' must be Hypermap safe (a-z, 0-9, - allowed).",
                 new_dir,
                 package_name,
             )
@@ -297,7 +297,7 @@ pub fn execute(
     }
     if !is_hypermap_safe(&publisher, true) {
         return Err(eyre!(
-            "`publisher` '{}' must be Kimap safe (a-z, 0-9, -, . allowed).",
+            "`publisher` '{}' must be Hypermap safe (a-z, 0-9, -, . allowed).",
             publisher
         ));
     }

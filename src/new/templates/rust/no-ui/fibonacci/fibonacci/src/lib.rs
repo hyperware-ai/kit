@@ -5,7 +5,7 @@ use hyperware_process_lib::logging::{error, info, init_logging, Level};
 use hyperware_process_lib::{await_message, call_init, Address, Message, Response};
 
 wit_bindgen::generate!({
-    path: "target/wit",
+    path: "../target/wit",
     world: "fibonacci-template-dot-os-v0",
     generate_unused_types: true,
     additional_derives: [serde::Deserialize, serde::Serialize, process_macros::SerdeJsonInto],

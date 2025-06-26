@@ -153,6 +153,10 @@ async fn execute(
             let is_persist = matches.get_one::<bool>("PERSIST").unwrap();
             let release = matches.get_one::<bool>("RELEASE").unwrap();
             let verbosity = matches.get_one::<u8>("VERBOSITY").unwrap();
+            let args = matches
+                .get_one::<String>("ARGS")
+                .map(|s| s.split_whitespace().map(String::from).collect())
+                .unwrap_or_else(|| vec![]);
 
             println!("boot_fake_node: {runtime_path:?}");
             boot_fake_node::execute(
@@ -167,7 +171,7 @@ async fn execute(
                 *is_persist,
                 *release,
                 *verbosity,
-                vec![],
+                args,
             )
             .await
         }
@@ -184,6 +188,10 @@ async fn execute(
             // let password = matches.get_one::<String>("PASSWORD").unwrap(); // TODO: with develop 0.8.0
             let release = matches.get_one::<bool>("RELEASE").unwrap();
             let verbosity = matches.get_one::<u8>("VERBOSITY").unwrap();
+            let args = matches
+                .get_one::<String>("ARGS")
+                .map(|s| s.split_whitespace().map(String::from).collect())
+                .unwrap_or_else(|| vec![]);
 
             boot_real_node::execute(
                 runtime_path,
@@ -194,7 +202,7 @@ async fn execute(
                 // password, // TODO: with develop 0.8.0
                 *release,
                 *verbosity,
-                vec![],
+                args,
             )
             .await
         }
@@ -235,6 +243,7 @@ async fn execute(
                 .map(|s| PathBuf::from(s))
                 .collect();
             let rewrite = matches.get_one::<bool>("REWRITE").unwrap();
+            let hyperapp = matches.get_one::<bool>("HYPERAPP").unwrap();
             let reproducible = matches.get_one::<bool>("REPRODUCIBLE").unwrap();
             let force = matches.get_one::<bool>("FORCE").unwrap();
             let verbose = matches.get_one::<bool>("VERBOSE").unwrap();
@@ -253,6 +262,7 @@ async fn execute(
                 local_dependencies,
                 add_paths_to_api,
                 *rewrite,
+                *hyperapp,
                 *reproducible,
                 *force,
                 *verbose,
@@ -298,6 +308,7 @@ async fn execute(
                 .map(|s| PathBuf::from(s))
                 .collect();
             let rewrite = matches.get_one::<bool>("REWRITE").unwrap();
+            let hyperapp = matches.get_one::<bool>("HYPERAPP").unwrap();
             let reproducible = matches.get_one::<bool>("REPRODUCIBLE").unwrap();
             let force = matches.get_one::<bool>("FORCE").unwrap();
             let verbose = matches.get_one::<bool>("VERBOSE").unwrap();
@@ -316,6 +327,7 @@ async fn execute(
                 local_dependencies,
                 add_paths_to_api,
                 *rewrite,
+                *hyperapp,
                 *reproducible,
                 *force,
                 *verbose,
@@ -574,7 +586,7 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
             .arg(Arg::new("RPC_ENDPOINT")
                 .action(ArgAction::Set)
                 .long("rpc")
-                .help("Ethereum Optimism mainnet RPC endpoint (wss://)")
+                .help("Ethereum Base mainnet RPC endpoint (wss://)")
                 .required(false)
             )
             .arg(Arg::new("PERSIST")
@@ -601,6 +613,13 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .help("Verbosity of node: higher is more verbose")
                 .default_value("0")
                 .value_parser(value_parser!(u8))
+            )
+            .arg(Arg::new("ARGS")
+                .action(ArgAction::Set)
+                .short('a')
+                .long("args")
+                .help("Additional arguments to pass to the node")
+                .required(false)
             )
         )
         .subcommand(Command::new("boot-real-node")
@@ -651,7 +670,7 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
             .arg(Arg::new("RPC_ENDPOINT")
                 .action(ArgAction::Set)
                 .long("rpc")
-                .help("Ethereum Optimism mainnet RPC endpoint (wss://)")
+                .help("Ethereum Base mainnet RPC endpoint (wss://)")
                 .required(false)
             )
             //.arg(Arg::new("PASSWORD")  // TODO: with develop 0.8.0
@@ -672,6 +691,13 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .help("Verbosity of node: higher is more verbose")
                 .default_value("0")
                 .value_parser(value_parser!(u8))
+            )
+            .arg(Arg::new("ARGS")
+                .action(ArgAction::Set)
+                .short('a')
+                .long("args")
+                .help("Additional arguments to pass to the node")
+                .required(false)
             )
         )
         .subcommand(Command::new("build")
@@ -756,6 +782,12 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .action(ArgAction::SetTrue)
                 .long("rewrite")
                 .help("Rewrite the package (disables `Spawn!()`) [default: don't rewrite]")
+                .required(false)
+            )
+            .arg(Arg::new("HYPERAPP")
+                .action(ArgAction::SetTrue)
+                .long("hyperapp")
+                .help("Build using the Hyperapp framework [default: don't use Hyperapp framework]")
                 .required(false)
             )
             .arg(Arg::new("REPRODUCIBLE")
@@ -863,6 +895,12 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .action(ArgAction::SetTrue)
                 .long("no-rewrite")
                 .help("Rewrite the package (disables `Spawn!()`) [default: don't rewrite]")
+                .required(false)
+            )
+            .arg(Arg::new("HYPERAPP")
+                .action(ArgAction::SetTrue)
+                .long("hyperapp")
+                .help("Build using the Hyperapp framework [default: don't use Hyperapp framework]")
                 .required(false)
             )
             .arg(Arg::new("REPRODUCIBLE")
@@ -1100,7 +1138,7 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .action(ArgAction::Set)
                 .short('r')
                 .long("rpc")
-                .help("Ethereum Optimism mainnet RPC endpoint (wss://)")
+                .help("Ethereum Base mainnet RPC endpoint (wss://)")
                 .required(true)
             )
             .arg(Arg::new("REAL")
