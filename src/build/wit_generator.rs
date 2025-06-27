@@ -575,10 +575,30 @@ fn generate_signature_struct(
     let signature_struct_name = format!("{}-signature-{}", kebab_name, attr_type);
 
     // Generate comment for this specific function
-    let comment = format!(
+    let mut comment = format!(
         "    // Function signature for: {} ({})",
         kebab_name, attr_type
     );
+
+    // For HTTP endpoints, try to extract method and path from attribute
+    let mut has_explicit_path = false;
+    if attr_type == "http" {
+        if let Some((http_method, http_path)) = extract_http_info(&method.attrs)? {
+            comment.push_str(&format!("\n    // HTTP: {} {}", http_method, http_path));
+            // Check if path was explicitly defined (not just defaulted)
+            has_explicit_path = method.attrs.iter().any(|attr| {
+                if attr.path().is_ident("http") {
+                    let attr_str = format!("{:?}", attr);
+                    attr_str.contains("path")
+                } else {
+                    false
+                }
+            });
+        } else {
+            // Default path if not specified
+            comment.push_str(&format!("\n    // HTTP: POST /api/{}", kebab_name));
+        }
+    }
 
     // Create struct fields that directly represent function parameters
     let mut struct_fields = Vec::new();
@@ -636,6 +656,8 @@ fn generate_signature_struct(
         }
     }
 
+    // HTTP handlers no longer require parameters - they can have zero parameters
+
     // Add return type field
     match &method.sig.output {
         syn::ReturnType::Type(_, ty) => match rust_type_to_wit(&*ty, used_types) {
@@ -679,6 +701,58 @@ fn generate_signature_struct(
     );
 
     Ok(record_def)
+}
+
+// Helper function to extract HTTP method and path from [http] attribute
+#[instrument(level = "trace", skip_all)]
+fn extract_http_info(attrs: &[Attribute]) -> Result<Option<(String, String)>> {
+    for attr in attrs {
+        if attr.path().is_ident("http") {
+            // Convert attribute to string representation for parsing
+            let attr_str = format!("{:?}", attr);
+            debug!(attr_str = %attr_str, "HTTP attribute string");
+
+            let mut method = None;
+            let mut path = None;
+
+            // Look for method parameter
+            if let Some(method_pos) = attr_str.find("method") {
+                if let Some(eq_pos) = attr_str[method_pos..].find('=') {
+                    let start_pos = method_pos + eq_pos + 1;
+                    // Find the quoted value
+                    if let Some(quote_start) = attr_str[start_pos..].find('"') {
+                        let value_start = start_pos + quote_start + 1;
+                        if let Some(quote_end) = attr_str[value_start..].find('"') {
+                            method =
+                                Some(attr_str[value_start..value_start + quote_end].to_string());
+                        }
+                    }
+                }
+            }
+
+            // Look for path parameter
+            if let Some(path_pos) = attr_str.find("path") {
+                if let Some(eq_pos) = attr_str[path_pos..].find('=') {
+                    let start_pos = path_pos + eq_pos + 1;
+                    // Find the quoted value
+                    if let Some(quote_start) = attr_str[start_pos..].find('"') {
+                        let value_start = start_pos + quote_start + 1;
+                        if let Some(quote_end) = attr_str[value_start..].find('"') {
+                            path = Some(attr_str[value_start..value_start + quote_end].to_string());
+                        }
+                    }
+                }
+            }
+
+            // If we found at least one parameter, return the info
+            if method.is_some() || path.is_some() {
+                let final_method = method.unwrap_or_else(|| "POST".to_string());
+                let final_path = path.unwrap_or_else(|| "/api".to_string());
+                return Ok(Some((final_method, final_path)));
+            }
+        }
+    }
+    Ok(None)
 }
 
 // Helper trait to get TypePath from Type
@@ -803,15 +877,21 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             let has_local = method.attrs.iter().any(|a| a.path().is_ident("local"));
             let has_http = method.attrs.iter().any(|a| a.path().is_ident("http"));
             let has_init = method.attrs.iter().any(|a| a.path().is_ident("init"));
+            let has_ws = method.attrs.iter().any(|a| a.path().is_ident("ws"));
 
-            if has_remote || has_local || has_http || has_init {
-                debug!(remote=%has_remote, local=%has_local, http=%has_http, init=%has_init, "Method attributes found");
+            if has_remote || has_local || has_http || has_init || has_ws {
+                debug!(remote=%has_remote, local=%has_local, http=%has_http, init=%has_init, ws=%has_ws, "Method attributes found");
                 // Validate original Rust function name
                 validate_name(&method_name, "Function")?; // Error early if name invalid
                 let func_kebab_name = to_kebab_case(&method_name);
 
                 if has_init {
                     debug!(method_name = %method_name, "Found [init] function, skipping signature generation");
+                    continue;
+                }
+
+                if has_ws {
+                    debug!(method_name = %method_name, "Found [ws] function, skipping signature generation (websocket handlers are ignored by WIT generator)");
                     continue;
                 }
 
@@ -847,7 +927,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             } else {
                 // Method in hyperprocess impl lacks required attribute - Error
                 return Err(eyre!(
-                         "Method '{}' in the #[hyperprocess] impl block is missing a required attribute ([remote], [local], [http], or [init]). Only methods with these attributes should be included.",
+                         "Method '{}' in the #[hyperprocess] impl block is missing a required attribute ([remote], [local], [http], [init], or [ws]). Only methods with these attributes should be included.",
                          method_name
                      ));
             }
