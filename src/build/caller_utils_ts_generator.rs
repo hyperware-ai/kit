@@ -394,7 +394,7 @@ fn generate_typescript_function(signature: &SignatureStruct) -> (String, String,
     let request_interface = if param_names.is_empty() {
         // No parameters case
         format!(
-            "export interface {}Request {{\n  {}: {{}}\n}}",
+            "export interface {}Request {{\n  {}: null\n}}",
             pascal_function_name, pascal_function_name
         )
     } else if param_names.len() == 1 {
@@ -424,7 +424,7 @@ fn generate_typescript_function(signature: &SignatureStruct) -> (String, String,
 
     let data_construction = if param_names.is_empty() {
         format!(
-            "  const data: {}Request = {{\n    {}: {{}},\n  }};",
+            "  const data: {}Request = {{\n    {}: null,\n  }};",
             pascal_function_name, pascal_function_name
         )
     } else if param_names.len() == 1 {
