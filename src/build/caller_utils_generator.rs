@@ -673,10 +673,7 @@ crate-type = ["cdylib", "lib"]
 
     // Add global imports
     lib_rs.push_str("pub use hyperware_app_common::AppSendError;\n");
-    lib_rs.push_str("pub use hyperware_app_common::send;\n");
-    lib_rs.push_str("use hyperware_app_common::hyperware_process_lib as hyperware_process_lib;\n");
-    lib_rs.push_str("use hyperware_process_lib::{Address, Request};\n");
-    lib_rs.push_str("use serde_json::json;\n\n");
+    lib_rs.push_str("pub use hyperware_app_common::send;\n\n");
 
     // Add interface use statements
     if !interface_use_statements.is_empty() {
@@ -696,6 +693,7 @@ crate-type = ["cdylib", "lib"]
         lib_rs.push_str(&format!("pub mod {} {{\n", module_name));
         // Add necessary imports at the module level
         lib_rs.push_str("    use super::*;\n");
+        lib_rs.push_str("    use hyperware_app_common::hyperware_process_lib::{Address, Request};\n");
         lib_rs.push_str("    use serde_json::json;\n\n");
         lib_rs.push_str(&format!("    {}\n", module_content.replace("\n", "\n    ")));
         lib_rs.push_str("}\n\n");
