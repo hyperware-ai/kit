@@ -694,7 +694,9 @@ crate-type = ["cdylib", "lib"]
             module_name
         ));
         lib_rs.push_str(&format!("pub mod {} {{\n", module_name));
-        lib_rs.push_str("    use crate::*;\n\n");
+        // Add necessary imports at the module level
+        lib_rs.push_str("    use super::*;\n");
+        lib_rs.push_str("    use serde_json::json;\n\n");
         lib_rs.push_str(&format!("    {}\n", module_content.replace("\n", "\n    ")));
         lib_rs.push_str("}\n\n");
     }
