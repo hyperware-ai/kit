@@ -693,7 +693,8 @@ crate-type = ["cdylib", "lib"]
         lib_rs.push_str(&format!("pub mod {} {{\n", module_name));
         // Add necessary imports at the module level
         lib_rs.push_str("    use super::*;\n");
-        lib_rs.push_str("    use hyperware_app_common::hyperware_process_lib::{Address, Request};\n");
+        lib_rs
+            .push_str("    use hyperware_app_common::hyperware_process_lib::{Address, Request};\n");
         lib_rs.push_str("    use serde_json::json;\n\n");
         lib_rs.push_str(&format!("    {}\n", module_content.replace("\n", "\n    ")));
         lib_rs.push_str("}\n\n");
