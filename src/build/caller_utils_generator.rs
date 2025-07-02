@@ -640,22 +640,47 @@ crate-type = ["cdylib", "lib"]
         }
     }
 
-    // Create import statements for each interface using "hyperware::process::{interface_name}::*"
-    // Use a HashSet to track which interfaces we've already processed to avoid duplicates
+    // Create import statements - only import what we actually need from each interface
     let mut processed_interfaces = std::collections::HashSet::new();
     let mut interface_use_statements = Vec::new();
 
     for interface_name in &interface_imports {
-        // Convert to snake case for module name
         let snake_interface_name = to_snake_case(interface_name);
 
         // Only add the import if we haven't processed this interface yet
         if processed_interfaces.insert(snake_interface_name.clone()) {
-            // Create wildcard import for this interface
-            interface_use_statements.push(format!(
-                "pub use crate::hyperware::process::{}::*;",
-                snake_interface_name
-            ));
+            if snake_interface_name == "standard" {
+                // For standard, we don't need to import anything at the top level
+                // since we import Address and Request directly in each module
+                continue;
+            } else {
+                // For other interfaces, only import the signature structs and interface-specific types
+                // Collect all the types we need from this interface
+                let interface_specific_types: Vec<String> = interface_types
+                    .get(interface_name)
+                    .unwrap_or(&Vec::new())
+                    .iter()
+                    .filter(|type_name| {
+                        // Only import signature structs and non-standard types
+                        type_name.contains("-signature-") || 
+                        (!["address", "request", "response", "message"].contains(&type_name.to_lowercase().as_str()))
+                    })
+                    .cloned()
+                    .collect();
+
+                if !interface_specific_types.is_empty() {
+                    let pascal_types: Vec<String> = interface_specific_types
+                        .iter()
+                        .map(|t| to_pascal_case(t))
+                        .collect();
+                    
+                    interface_use_statements.push(format!(
+                        "pub use crate::hyperware::process::{}::{{{}}};",
+                        snake_interface_name,
+                        pascal_types.join(", ")
+                    ));
+                }
+            }
         }
     }
 
