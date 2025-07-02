@@ -201,7 +201,7 @@ async fn boot_nodes(
         for dir in &["kernel", "kv", "sqlite", "vfs"] {
             let dir = node_home.join(dir);
             if dir.exists() {
-                fs::remove_dir_all(&node_home.join(dir)).unwrap();
+                fs::remove_dir_all(&node_home.join(dir))?;
             }
         }
 
