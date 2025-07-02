@@ -662,8 +662,9 @@ crate-type = ["cdylib", "lib"]
                     .iter()
                     .filter(|type_name| {
                         // Only import signature structs and non-standard types
-                        type_name.contains("-signature-") || 
-                        (!["address", "request", "response", "message"].contains(&type_name.to_lowercase().as_str()))
+                        type_name.contains("-signature-")
+                            || (!["address", "request", "response", "message"]
+                                .contains(&type_name.to_lowercase().as_str()))
                     })
                     .cloned()
                     .collect();
@@ -673,7 +674,7 @@ crate-type = ["cdylib", "lib"]
                         .iter()
                         .map(|t| to_pascal_case(t))
                         .collect();
-                    
+
                     interface_use_statements.push(format!(
                         "pub use crate::hyperware::process::{}::{{{}}};",
                         snake_interface_name,
