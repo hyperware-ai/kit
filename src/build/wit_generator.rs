@@ -139,6 +139,41 @@ fn is_wit_primitive_or_builtin(type_name: &str) -> bool {
         || type_name.starts_with("tuple<")
 }
 
+// Extract custom type names from a WIT type string (e.g., "list<foo-bar>" -> ["foo-bar"])
+fn extract_custom_types_from_wit_type(wit_type: &str) -> Vec<String> {
+    let mut custom_types = Vec::new();
+
+    // Skip if it's a primitive type
+    if is_wit_primitive_or_builtin(wit_type) && !wit_type.contains('<') {
+        return custom_types;
+    }
+
+    // Handle composite types like list<T>, option<T>, result<T, E>, tuple<T1, T2, ...>
+    if let Some(start) = wit_type.find('<') {
+        if let Some(end) = wit_type.rfind('>') {
+            let inner = &wit_type[start + 1..end];
+
+            // Split by comma to handle multiple type parameters
+            for part in inner.split(',') {
+                let trimmed = part.trim();
+                if !trimmed.is_empty() && trimmed != "_" && !is_wit_primitive_or_builtin(trimmed) {
+                    // Recursively extract from nested types
+                    if trimmed.contains('<') {
+                        custom_types.extend(extract_custom_types_from_wit_type(trimmed));
+                    } else {
+                        custom_types.push(trimmed.to_string());
+                    }
+                }
+            }
+        }
+    } else if !is_wit_primitive_or_builtin(wit_type) {
+        // It's a non-composite custom type
+        custom_types.push(wit_type.to_string());
+    }
+
+    custom_types
+}
+
 // Convert Rust type to WIT type, including downstream types
 #[instrument(level = "trace", skip_all)]
 fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<String> {
@@ -403,10 +438,10 @@ fn find_and_make_wit_type_def(
                                 let field_wit_type = rust_type_to_wit(&f.ty, global_used_types)
                                     .wrap_err_with(|| format!("Failed to convert field '{}':'{:?}' in struct '{}'", field_orig_name, f.ty, orig_name))?;
 
-                                // If the resulting WIT type itself is custom, add it to *local* dependencies
-                                // so the caller knows this struct definition depends on it.
-                                if !is_wit_primitive_or_builtin(&field_wit_type) {
-                                    local_dependencies.insert(field_wit_type.clone());
+                                // Extract any custom types from the field type and add them to local dependencies
+                                // For example, from "list<participant-info>" we extract "participant-info"
+                                for custom_type in extract_custom_types_from_wit_type(&field_wit_type) {
+                                    local_dependencies.insert(custom_type);
                                 }
 
                                 field_strings.push(format!("        {}: {}", field_kebab_name, field_wit_type));
@@ -465,9 +500,9 @@ fn find_and_make_wit_type_def(
                                 )
                             })?;
 
-                            // Check if the variant's type is custom and add to local deps
-                            if !is_wit_primitive_or_builtin(&type_result) {
-                                local_dependencies.insert(type_result.clone());
+                            // Extract any custom types from the variant type and add them to local dependencies
+                            for custom_type in extract_custom_types_from_wit_type(&type_result) {
+                                local_dependencies.insert(custom_type);
                             }
                             variants_wit
                                 .push(format!("        {}({})", variant_kebab_name, type_result));
