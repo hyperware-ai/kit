@@ -616,19 +616,9 @@ fn generate_signature_struct(
     );
 
     // For HTTP endpoints, try to extract method and path from attribute
-    let mut has_explicit_path = false;
     if attr_type == "http" {
         if let Some((http_method, http_path)) = extract_http_info(&method.attrs)? {
             comment.push_str(&format!("\n    // HTTP: {} {}", http_method, http_path));
-            // Check if path was explicitly defined (not just defaulted)
-            has_explicit_path = method.attrs.iter().any(|attr| {
-                if attr.path().is_ident("http") {
-                    let attr_str = format!("{:?}", attr);
-                    attr_str.contains("path")
-                } else {
-                    false
-                }
-            });
         } else {
             // Default path if not specified
             comment.push_str(&format!("\n    // HTTP: POST /api/{}", kebab_name));
