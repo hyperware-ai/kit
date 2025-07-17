@@ -139,6 +139,41 @@ fn is_wit_primitive_or_builtin(type_name: &str) -> bool {
         || type_name.starts_with("tuple<")
 }
 
+// Extract custom type names from a WIT type string (e.g., "list<foo-bar>" -> ["foo-bar"])
+fn extract_custom_types_from_wit_type(wit_type: &str) -> Vec<String> {
+    let mut custom_types = Vec::new();
+
+    // Skip if it's a primitive type
+    if is_wit_primitive_or_builtin(wit_type) && !wit_type.contains('<') {
+        return custom_types;
+    }
+
+    // Handle composite types like list<T>, option<T>, result<T, E>, tuple<T1, T2, ...>
+    if let Some(start) = wit_type.find('<') {
+        if let Some(end) = wit_type.rfind('>') {
+            let inner = &wit_type[start + 1..end];
+
+            // Split by comma to handle multiple type parameters
+            for part in inner.split(',') {
+                let trimmed = part.trim();
+                if !trimmed.is_empty() && trimmed != "_" && !is_wit_primitive_or_builtin(trimmed) {
+                    // Recursively extract from nested types
+                    if trimmed.contains('<') {
+                        custom_types.extend(extract_custom_types_from_wit_type(trimmed));
+                    } else {
+                        custom_types.push(trimmed.to_string());
+                    }
+                }
+            }
+        }
+    } else if !is_wit_primitive_or_builtin(wit_type) {
+        // It's a non-composite custom type
+        custom_types.push(wit_type.to_string());
+    }
+
+    custom_types
+}
+
 // Convert Rust type to WIT type, including downstream types
 #[instrument(level = "trace", skip_all)]
 fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<String> {
@@ -403,10 +438,10 @@ fn find_and_make_wit_type_def(
                                 let field_wit_type = rust_type_to_wit(&f.ty, global_used_types)
                                     .wrap_err_with(|| format!("Failed to convert field '{}':'{:?}' in struct '{}'", field_orig_name, f.ty, orig_name))?;
 
-                                // If the resulting WIT type itself is custom, add it to *local* dependencies
-                                // so the caller knows this struct definition depends on it.
-                                if !is_wit_primitive_or_builtin(&field_wit_type) {
-                                    local_dependencies.insert(field_wit_type.clone());
+                                // Extract any custom types from the field type and add them to local dependencies
+                                // For example, from "list<participant-info>" we extract "participant-info"
+                                for custom_type in extract_custom_types_from_wit_type(&field_wit_type) {
+                                    local_dependencies.insert(custom_type);
                                 }
 
                                 field_strings.push(format!("        {}: {}", field_kebab_name, field_wit_type));
@@ -465,9 +500,9 @@ fn find_and_make_wit_type_def(
                                 )
                             })?;
 
-                            // Check if the variant's type is custom and add to local deps
-                            if !is_wit_primitive_or_builtin(&type_result) {
-                                local_dependencies.insert(type_result.clone());
+                            // Extract any custom types from the variant type and add them to local dependencies
+                            for custom_type in extract_custom_types_from_wit_type(&type_result) {
+                                local_dependencies.insert(custom_type);
                             }
                             variants_wit
                                 .push(format!("        {}({})", variant_kebab_name, type_result));
@@ -575,10 +610,20 @@ fn generate_signature_struct(
     let signature_struct_name = format!("{}-signature-{}", kebab_name, attr_type);
 
     // Generate comment for this specific function
-    let comment = format!(
+    let mut comment = format!(
         "    // Function signature for: {} ({})",
         kebab_name, attr_type
     );
+
+    // For HTTP endpoints, try to extract method and path from attribute
+    if attr_type == "http" {
+        if let Some((http_method, http_path)) = extract_http_info(&method.attrs)? {
+            comment.push_str(&format!("\n    // HTTP: {} {}", http_method, http_path));
+        } else {
+            // Default path if not specified
+            comment.push_str(&format!("\n    // HTTP: POST /api/{}", kebab_name));
+        }
+    }
 
     // Create struct fields that directly represent function parameters
     let mut struct_fields = Vec::new();
@@ -636,6 +681,8 @@ fn generate_signature_struct(
         }
     }
 
+    // HTTP handlers no longer require parameters - they can have zero parameters
+
     // Add return type field
     match &method.sig.output {
         syn::ReturnType::Type(_, ty) => match rust_type_to_wit(&*ty, used_types) {
@@ -679,6 +726,58 @@ fn generate_signature_struct(
     );
 
     Ok(record_def)
+}
+
+// Helper function to extract HTTP method and path from [http] attribute
+#[instrument(level = "trace", skip_all)]
+fn extract_http_info(attrs: &[Attribute]) -> Result<Option<(String, String)>> {
+    for attr in attrs {
+        if attr.path().is_ident("http") {
+            // Convert attribute to string representation for parsing
+            let attr_str = format!("{:?}", attr);
+            debug!(attr_str = %attr_str, "HTTP attribute string");
+
+            let mut method = None;
+            let mut path = None;
+
+            // Look for method parameter
+            if let Some(method_pos) = attr_str.find("method") {
+                if let Some(eq_pos) = attr_str[method_pos..].find('=') {
+                    let start_pos = method_pos + eq_pos + 1;
+                    // Find the quoted value
+                    if let Some(quote_start) = attr_str[start_pos..].find('"') {
+                        let value_start = start_pos + quote_start + 1;
+                        if let Some(quote_end) = attr_str[value_start..].find('"') {
+                            method =
+                                Some(attr_str[value_start..value_start + quote_end].to_string());
+                        }
+                    }
+                }
+            }
+
+            // Look for path parameter
+            if let Some(path_pos) = attr_str.find("path") {
+                if let Some(eq_pos) = attr_str[path_pos..].find('=') {
+                    let start_pos = path_pos + eq_pos + 1;
+                    // Find the quoted value
+                    if let Some(quote_start) = attr_str[start_pos..].find('"') {
+                        let value_start = start_pos + quote_start + 1;
+                        if let Some(quote_end) = attr_str[value_start..].find('"') {
+                            path = Some(attr_str[value_start..value_start + quote_end].to_string());
+                        }
+                    }
+                }
+            }
+
+            // If we found at least one parameter, return the info
+            if method.is_some() || path.is_some() {
+                let final_method = method.unwrap_or_else(|| "POST".to_string());
+                let final_path = path.unwrap_or_else(|| "/api".to_string());
+                return Ok(Some((final_method, final_path)));
+            }
+        }
+    }
+    Ok(None)
 }
 
 // Helper trait to get TypePath from Type
@@ -803,15 +902,21 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             let has_local = method.attrs.iter().any(|a| a.path().is_ident("local"));
             let has_http = method.attrs.iter().any(|a| a.path().is_ident("http"));
             let has_init = method.attrs.iter().any(|a| a.path().is_ident("init"));
+            let has_ws = method.attrs.iter().any(|a| a.path().is_ident("ws"));
 
-            if has_remote || has_local || has_http || has_init {
-                debug!(remote=%has_remote, local=%has_local, http=%has_http, init=%has_init, "Method attributes found");
+            if has_remote || has_local || has_http || has_init || has_ws {
+                debug!(remote=%has_remote, local=%has_local, http=%has_http, init=%has_init, ws=%has_ws, "Method attributes found");
                 // Validate original Rust function name
                 validate_name(&method_name, "Function")?; // Error early if name invalid
                 let func_kebab_name = to_kebab_case(&method_name);
 
                 if has_init {
                     debug!(method_name = %method_name, "Found [init] function, skipping signature generation");
+                    continue;
+                }
+
+                if has_ws {
+                    debug!(method_name = %method_name, "Found [ws] function, skipping signature generation (websocket handlers are ignored by WIT generator)");
                     continue;
                 }
 
@@ -847,7 +952,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             } else {
                 // Method in hyperprocess impl lacks required attribute - Error
                 return Err(eyre!(
-                         "Method '{}' in the #[hyperprocess] impl block is missing a required attribute ([remote], [local], [http], or [init]). Only methods with these attributes should be included.",
+                         "Method '{}' in the #[hyperprocess] impl block is missing a required attribute ([remote], [local], [http], [init], or [ws]). Only methods with these attributes should be included.",
                          method_name
                      ));
             }
