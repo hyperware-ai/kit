@@ -425,10 +425,9 @@ pub async fn execute(
 
     let chain_id = if *real { REAL_CHAIN_ID } else { FAKE_CHAIN_ID };
 
-    // Check if using Gnosis Safe mode
-    let is_safe_mode = safe.is_some();
+    let is_safe_tx = safe.is_some();
 
-    let (wallet_address, wallet) = if is_safe_mode {
+    let (wallet_address, wallet) = if is_safe_tx {
         // In Safe mode, we don't need a wallet for signing
         // Parse the Safe address provided by the user
         let safe_address = Address::from_str(safe.unwrap())?;
@@ -467,7 +466,7 @@ pub async fn execute(
     )
     .await?;
 
-    if is_safe_mode {
+    if is_safe_tx {
         // Generate Safe transaction data
         let tx_data = hex::encode(call);
 
@@ -481,7 +480,7 @@ pub async fn execute(
         //    tx_data
         //);
 
-        info!("=== Gnosis Safe Transaction Data ===");
+        info!("=== Safe Transaction Data ===");
         // TODO: can we get URL working? If so this is by far preferable
         //info!("Safe App URL (click or copy):");
         //info!("{}", make_remote_link(&safe_url, &safe_url));
