@@ -310,8 +310,10 @@ async fn prepare_hypermap_put(
 
 #[instrument(level = "trace", skip_all)]
 pub async fn build_tx(
-    package_dir: &Path,
     metadata_uri: &str,
+    metadata_hash: &str,
+    name: &str,
+    publisher: &str,
     provider: &RootProvider<PubSubFrontend>,
     real: &bool,
     unpublish: &bool,
@@ -320,26 +322,7 @@ pub async fn build_tx(
     gas_limit: u64,
     max_priority_fee_per_gas: Option<u128>,
     max_fee_per_gas: Option<u128>,
-) -> Result<(String, Address, Vec<u8>, TransactionRequest)> {
-    let metadata = read_and_update_metadata(package_dir)?;
-
-    let name = metadata.name.clone().unwrap();
-    let publisher = metadata.properties.publisher.clone();
-
-    if !is_hypermap_safe(&name, false) {
-        return Err(eyre!(
-            "The App Store requires package names have only lowercase letters, digits, and `-`s"
-        ));
-    }
-    if !is_hypermap_safe(&publisher, true) {
-        return Err(eyre!(
-            "The App Store requires publisher names have only lowercase letters, digits, `-`s, and `.`s"
-        ));
-    }
-
-    let metadata_hash = check_remote_metadata(&metadata, metadata_uri, package_dir).await?;
-    check_pkg_hash(&metadata, package_dir, metadata_uri)?;
-
+) -> Result<(Address, Vec<u8>, TransactionRequest)> {
     let hypermap = Address::from_str(if *real {
         REAL_KIMAP_ADDRESS
     } else {
@@ -367,7 +350,7 @@ pub async fn build_tx(
 
         prepare_hypermap_put(
             multicall,
-            name.clone(),
+            name.to_string(),
             &publisher,
             hypermap,
             &provider,
@@ -395,7 +378,7 @@ pub async fn build_tx(
         )
         .with_max_fee_per_gas(max_fee_per_gas.unwrap_or_else(|| suggested_max_fee_per_gas));
 
-    Ok((name, to, call, tx))
+    Ok((to, call, tx))
 }
 
 #[instrument(level = "trace", skip_all)]
@@ -420,6 +403,25 @@ pub async fn execute(
             package_dir,
         ));
     }
+
+    let metadata = read_and_update_metadata(package_dir)?;
+
+    let name = metadata.name.clone().unwrap();
+    let publisher = metadata.properties.publisher.clone();
+
+    if !is_hypermap_safe(&name, false) {
+        return Err(eyre!(
+            "The App Store requires package names have only lowercase letters, digits, and `-`s"
+        ));
+    }
+    if !is_hypermap_safe(&publisher, true) {
+        return Err(eyre!(
+            "The App Store requires publisher names have only lowercase letters, digits, `-`s, and `.`s"
+        ));
+    }
+
+    let metadata_hash = check_remote_metadata(&metadata, metadata_uri, package_dir).await?;
+    check_pkg_hash(&metadata, package_dir, metadata_uri)?;
 
     let chain_id = if *real { REAL_CHAIN_ID } else { FAKE_CHAIN_ID };
 
@@ -449,9 +451,11 @@ pub async fn execute(
     let ws = WsConnect::new(rpc_uri);
     let provider: RootProvider<PubSubFrontend> = ProviderBuilder::default().on_ws(ws).await?;
 
-    let (name, to, call, tx) = build_tx(
-        package_dir,
+    let (to, call, tx) = build_tx(
         metadata_uri,
+        &metadata_hash,
+        &name,
+        &publisher,
         &provider,
         real,
         unpublish,
