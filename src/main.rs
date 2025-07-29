@@ -403,6 +403,9 @@ async fn execute(
                 .and_then(|kp| Some(PathBuf::from(kp)));
             let ledger = matches.get_one::<bool>("LEDGER").unwrap();
             let trezor = matches.get_one::<bool>("TREZOR").unwrap();
+            let safe = matches
+                .get_one::<String>("SAFE")
+                .and_then(|gs| Some(gs.as_str()));
             let rpc_uri = matches.get_one::<String>("RPC_URI").unwrap();
             let real = matches.get_one::<bool>("REAL").unwrap();
             let unpublish = matches.get_one::<bool>("UNPUBLISH").unwrap();
@@ -421,6 +424,7 @@ async fn execute(
                 keystore_path,
                 ledger,
                 trezor,
+                safe,
                 rpc_uri,
                 real,
                 unpublish,
@@ -1110,21 +1114,28 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .action(ArgAction::Set)
                 .short('k')
                 .long("keystore-path")
-                .help("Path to private key keystore (choose 1 of `k`, `l`, `t`)") // TODO: add link to docs?
+                .help("Path to private key keystore (choose 1 of `k`, `l`, `t`, `s`)") // TODO: add link to docs?
                 .required(false)
             )
             .arg(Arg::new("LEDGER")
                 .action(ArgAction::SetTrue)
                 .short('l')
                 .long("ledger")
-                .help("Use Ledger private key (choose 1 of `k`, `l`, `t`)")
+                .help("Use Ledger private key (choose 1 of `k`, `l`, `t`, `s`)")
                 .required(false)
             )
             .arg(Arg::new("TREZOR")
                 .action(ArgAction::SetTrue)
                 .short('t')
                 .long("trezor")
-                .help("Use Trezor private key (choose 1 of `k`, `l`, `t`)")
+                .help("Use Trezor private key (choose 1 of `k`, `l`, `t`, `s`)")
+                .required(false)
+            )
+            .arg(Arg::new("SAFE")
+                .action(ArgAction::Set)
+                .short('s')
+                .long("safe")
+                .help("Safe contract address (choose 1 of `k`, `l`, `t`, `s`)")
                 .required(false)
             )
             .arg(Arg::new("URI")
