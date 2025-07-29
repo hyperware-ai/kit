@@ -308,7 +308,6 @@ async fn prepare_hypermap_put(
     Ok((to, call))
 }
 
-
 #[instrument(level = "trace", skip_all)]
 pub async fn build_tx(
     package_dir: &Path,
@@ -461,7 +460,8 @@ pub async fn execute(
         gas_limit,
         max_priority_fee_per_gas,
         max_fee_per_gas,
-    ).await?;
+    )
+    .await?;
 
     if is_safe_mode {
         // Generate Safe transaction data
@@ -485,14 +485,22 @@ pub async fn execute(
         info!("Manual Steps:");
         info!("1. Go to your Safe at https://app.safe.global");
         info!("2. Click \"New Transaction\" → \"Transaction Builder\"");
-        info!("3. Enter the contract address in \"Enter Address or ENS Name\": {}", to);
+        info!(
+            "3. Enter the contract address in \"Enter Address or ENS Name\": {}",
+            to
+        );
         info!("4. Toggle \"Custom data\"");
         info!("5. Put in \"ETH value\": 0");
-        info!("6. Paste the transaction data in \"Data (Hex encoded)\": 0x{}", tx_data);
+        info!(
+            "6. Paste the transaction data in \"Data (Hex encoded)\": 0x{}",
+            tx_data
+        );
         info!("7. \"Add new transaction\" -> \"Create Batch\" -> \"Simulate\"");
         info!("8. If simulation passes, \"Send Batch\"");
         info!("9. Collect signatures from other Safe owners");
-        info!("10. Execute once threshold is reached (transaction only goes live in this final step)");
+        info!(
+            "10. Execute once threshold is reached (transaction only goes live in this final step)"
+        );
     } else {
         // Traditional wallet signing flow
         let wallet = wallet.unwrap();
