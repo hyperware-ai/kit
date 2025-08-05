@@ -1,12 +1,16 @@
 use crate::hyperware::process::fibonacci::{Request as FibRequest, Response as FibResponse};
-use crate::hyperware::process::tester::{Request as TesterRequest, Response as TesterResponse, RunRequest, FailResponse};
+use crate::hyperware::process::tester::{
+    FailResponse, Request as TesterRequest, Response as TesterResponse, RunRequest,
+};
 
-use hyperware_process_lib::{await_message, call_init, print_to_terminal, Address, ProcessId, Request, Response};
+use hyperware_process_lib::{
+    await_message, call_init, print_to_terminal, Address, ProcessId, Request, Response,
+};
 
 mod tester_lib;
 
 wit_bindgen::generate!({
-    path: "target/wit",
+    path: "../target/wit",
     world: "fibonacci-test-template-dot-os-v0",
     generate_unused_types: true,
     additional_derives: [PartialEq, serde::Deserialize, serde::Serialize, process_macros::SerdeJsonInto],
@@ -16,8 +20,11 @@ fn test_number(n: u32, address: &Address) -> anyhow::Result<u64> {
     let response = Request::new()
         .target(address)
         .body(FibRequest::Number(n))
-        .send_and_await_response(15)?.unwrap();
-    if response.is_request() { fail!("fibonacci_test"); };
+        .send_and_await_response(15)?
+        .unwrap();
+    if response.is_request() {
+        fail!("fibonacci_test");
+    };
     let FibResponse::Number(fib_number) = response.body().try_into()? else {
         fail!("fibonacci_test");
     };
@@ -28,15 +35,18 @@ fn test_numbers(n: u32, n_trials: u32, address: &Address) -> anyhow::Result<u64>
     let response = Request::new()
         .target(address)
         .body(FibRequest::Numbers((n, n_trials)))
-        .send_and_await_response(15)?.unwrap();
-    if response.is_request() { fail!("fibonacci_test"); };
+        .send_and_await_response(15)?
+        .unwrap();
+    if response.is_request() {
+        fail!("fibonacci_test");
+    };
     let FibResponse::Numbers((fib_number, _)) = response.body().try_into()? else {
         fail!("fibonacci_test");
     };
     Ok(fib_number)
 }
 
-fn handle_message (our: &Address) -> anyhow::Result<()> {
+fn handle_message(our: &Address) -> anyhow::Result<()> {
     let message = await_message().unwrap();
 
     if !message.is_request() {
@@ -93,12 +103,12 @@ fn init(our: Address) {
 
     loop {
         match handle_message(&our) {
-            Ok(()) => {},
+            Ok(()) => {}
             Err(e) => {
                 print_to_terminal(0, format!("fibonacci_test: error: {e:?}").as_str());
 
                 fail!("fibonacci_test");
-            },
+            }
         };
     }
 }

@@ -32,6 +32,10 @@ use crate::KIT_CACHE;
 mod rewrite;
 use rewrite::copy_and_rewrite_package;
 
+mod caller_utils_generator;
+mod caller_utils_ts_generator;
+mod wit_generator;
+
 const PY_VENV_NAME: &str = "process_env";
 const JAVASCRIPT_SRC_PATH: &str = "src/lib.js";
 const PYTHON_SRC_PATH: &str = "src/lib.py";
@@ -164,6 +168,25 @@ pub fn remove_missing_features(cargo_toml_path: &Path, features: Vec<&str>) -> R
             }
         })
         .collect())
+}
+
+#[instrument(level = "trace", skip_all)]
+pub fn get_process_name(cargo_toml_path: &Path) -> Result<String> {
+    let cargo_toml_content = fs::read_to_string(cargo_toml_path)?;
+    let cargo_toml: toml::Value = cargo_toml_content.parse()?;
+
+    if let Some(process_name) = cargo_toml
+        .get("package")
+        .and_then(|p| p.get("name"))
+        .and_then(|n| n.as_str())
+    {
+        let process_name = process_name.replace("_", "-");
+        Ok(process_name.to_string())
+    } else {
+        Err(eyre!(
+            "No package.name field in Cargo.toml at {cargo_toml_path:?}"
+        ))
+    }
 }
 
 /// Check if the first element is empty and there are no more elements
@@ -649,8 +672,6 @@ fn get_most_recent_modified_time(
         return Err(eyre!("Didn't find required dirs: {must_exist_dirs:?}"));
     }
 
-    debug!("get_most_recent_modified_time: most_recent: {most_recent:?}, most_recent_excluded: {most_recent_excluded:?}");
-
     Ok((most_recent, most_recent_excluded))
 }
 
@@ -898,18 +919,24 @@ async fn compile_rust_wasm_process(
     features: &str,
     verbose: bool,
 ) -> Result<()> {
+    let Some(package_dir) = process_dir.parent() else {
+        return Err(eyre!(
+            "Could not derive package dir from process_dir ({process_dir:?}) parent"
+        ));
+    };
+    let process_name = get_process_name(&process_dir.join("Cargo.toml"))?;
     info!("Compiling Rust Hyperware process in {:?}...", process_dir);
 
     // Paths
-    let wit_dir = process_dir.join("target").join("wit");
-    let bindings_dir = process_dir
+    let wit_dir = package_dir.join("target").join("wit");
+    let bindings_dir = package_dir
         .join("target")
         .join("bindings")
-        .join(process_dir.file_name().unwrap());
+        .join(package_dir.file_name().unwrap());
     fs::create_dir_all(&bindings_dir)?;
 
     // Check and download wasi_snapshot_preview1.wasm if it does not exist
-    let wasi_snapshot_file = process_dir
+    let wasi_snapshot_file = package_dir
         .join("target")
         .join("wasi_snapshot_preview1.wasm");
     let wasi_snapshot_url = format!(
@@ -932,6 +959,8 @@ async fn compile_rust_wasm_process(
     let mut args = vec![
         "+stable",
         "build",
+        "-p",
+        &process_name,
         "--release",
         "--no-default-features",
         "--target",
@@ -947,7 +976,7 @@ async fn compile_rust_wasm_process(
     } else {
         features.len()
     };
-    let features = remove_missing_features(&process_dir.join("Cargo.toml"), features)?;
+    let features = remove_missing_features(&package_dir.join("Cargo.toml"), features)?;
     if !test_only && original_length != features.len() {
         info!(
             "process {:?} missing features; using {:?}",
@@ -960,7 +989,7 @@ async fn compile_rust_wasm_process(
         args.push(&features);
     }
     let result = run_command(
-        Command::new("cargo").args(&args).current_dir(process_dir),
+        Command::new("cargo").args(&args).current_dir(package_dir),
         verbose,
     )?;
 
@@ -978,7 +1007,7 @@ async fn compile_rust_wasm_process(
     // For use inside of process_dir
     // Run `wasm-tools component new`, putting output in pkg/
     //  and rewriting all `_`s to `-`s
-    // cargo hates `-`s and so outputs with `_`s; Kimap hates
+    // cargo hates `-`s and so outputs with `_`s; Hypermap hates
     //  `_`s and so we convert to and enforce all `-`s
     let wasm_file_name_cab = process_dir
         .file_name()
@@ -990,7 +1019,7 @@ async fn compile_rust_wasm_process(
     let wasm_file_prefix = Path::new("target/wasm32-wasip1/release");
     let wasm_file_cab = wasm_file_prefix.join(&format!("{wasm_file_name_cab}.wasm"));
 
-    let wasm_file_pkg = format!("../pkg/{wasm_file_name_hep}.wasm");
+    let wasm_file_pkg = format!("pkg/{wasm_file_name_hep}.wasm");
     let wasm_file_pkg = Path::new(&wasm_file_pkg);
 
     let wasi_snapshot_file = Path::new("target/wasi_snapshot_preview1.wasm");
@@ -1006,7 +1035,7 @@ async fn compile_rust_wasm_process(
                 "--adapt",
                 wasi_snapshot_file.to_str().unwrap(),
             ])
-            .current_dir(process_dir),
+            .current_dir(package_dir),
         verbose,
     )?;
 
@@ -1067,11 +1096,11 @@ async fn compile_and_copy_ui(
 
 #[instrument(level = "trace", skip_all)]
 async fn build_wit_dir(
-    process_dir: &Path,
+    package_dir: &Path,
     apis: &HashMap<String, Vec<u8>>,
     wit_version: Option<u32>,
 ) -> Result<()> {
-    let wit_dir = process_dir.join("target").join("wit");
+    let wit_dir = package_dir.join("target").join("wit");
     if wit_dir.exists() {
         fs::remove_dir_all(&wit_dir)?;
     }
@@ -1090,29 +1119,21 @@ async fn build_wit_dir(
 async fn compile_package_item(
     path: PathBuf,
     features: String,
-    apis: HashMap<String, Vec<u8>>,
     world: String,
-    wit_version: Option<u32>,
+    is_rust_process: bool,
+    is_py_process: bool,
+    is_js_process: bool,
     verbose: bool,
 ) -> Result<()> {
-    if path.is_dir() {
-        let is_rust_process = path.join(RUST_SRC_PATH).exists();
-        let is_py_process = path.join(PYTHON_SRC_PATH).exists();
-        let is_js_process = path.join(JAVASCRIPT_SRC_PATH).exists();
-        if is_rust_process || is_py_process || is_js_process {
-            build_wit_dir(&path, &apis, wit_version).await?;
-        }
-
-        if is_rust_process {
-            compile_rust_wasm_process(&path, &features, verbose).await?;
-        } else if is_py_process {
-            let python = get_python_version(None, None)?
-                .ok_or_else(|| eyre!("kit requires Python 3.10 or newer"))?;
-            compile_python_wasm_process(&path, &python, &world, verbose).await?;
-        } else if is_js_process {
-            let valid_node = get_newest_valid_node_version(None, None)?;
-            compile_javascript_wasm_process(&path, valid_node, &world, verbose).await?;
-        }
+    if is_rust_process {
+        compile_rust_wasm_process(&path, &features, verbose).await?;
+    } else if is_py_process {
+        let python = get_python_version(None, None)?
+            .ok_or_else(|| eyre!("kit requires Python 3.10 or newer"))?;
+        compile_python_wasm_process(&path, &python, &world, verbose).await?;
+    } else if is_js_process {
+        let valid_node = get_newest_valid_node_version(None, None)?;
+        compile_javascript_wasm_process(&path, valid_node, &world, verbose).await?;
     }
     Ok(())
 }
@@ -1161,6 +1182,7 @@ async fn fetch_dependencies(
     include: &HashSet<PathBuf>,
     exclude: &HashSet<PathBuf>,
     rewrite: bool,
+    hyperapp: bool,
     force: bool,
     verbose: bool,
 ) -> Result<()> {
@@ -1178,6 +1200,7 @@ async fn fetch_dependencies(
         vec![], // TODO: what about deps-of-deps?
         vec![],
         rewrite,
+        hyperapp,
         false,
         force,
         verbose,
@@ -1215,6 +1238,7 @@ async fn fetch_dependencies(
             local_dep_deps,
             vec![],
             rewrite,
+            hyperapp,
             false,
             force,
             verbose,
@@ -1531,8 +1555,10 @@ async fn compile_package(
     include: &HashSet<PathBuf>,
     exclude: &HashSet<PathBuf>,
     rewrite: bool,
+    hyperapp: bool,
     force: bool,
     verbose: bool,
+    hyperapp_processed_projects: Option<Vec<PathBuf>>,
     ignore_deps: bool, // for internal use; may cause problems when adding recursive deps
 ) -> Result<()> {
     let metadata = read_and_update_metadata(package_dir)?;
@@ -1540,7 +1566,9 @@ async fn compile_package(
     let (mut apis, dependencies) =
         check_and_populate_dependencies(package_dir, &metadata, skip_deps_check, verbose).await?;
 
+    info!("dependencies: {dependencies:?}");
     if !ignore_deps && !dependencies.is_empty() {
+        info!("fetching dependencies...");
         fetch_dependencies(
             package_dir,
             &dependencies.iter().map(|s| s.to_string()).collect(),
@@ -1554,10 +1582,11 @@ async fn compile_package(
             include,
             exclude,
             rewrite,
+            hyperapp,
             force,
             verbose,
         )
-        .await?;
+        .await?
     }
 
     let wit_world = default_world
@@ -1566,8 +1595,11 @@ async fn compile_package(
         })
         .to_string();
 
+    build_wit_dir(&package_dir, &apis, metadata.properties.wit_version).await?;
+
     let mut tasks = tokio::task::JoinSet::new();
     let features = features.to_string();
+    let mut to_compile = HashSet::new();
     for entry in fs::read_dir(package_dir)? {
         let Ok(entry) = entry else {
             continue;
@@ -1576,12 +1608,35 @@ async fn compile_package(
         if !is_cluded(&path, include, exclude) {
             continue;
         }
+        if !path.is_dir() {
+            continue;
+        }
+
+        let is_rust_process = path.join(RUST_SRC_PATH).exists();
+        let is_py_process = path.join(PYTHON_SRC_PATH).exists();
+        let is_js_process = path.join(JAVASCRIPT_SRC_PATH).exists();
+        if is_rust_process || is_py_process || is_js_process {
+            to_compile.insert((path, is_rust_process, is_py_process, is_js_process));
+        }
+    }
+
+    let api_dir = package_dir.join("target").join("wit");
+    //info!("{processed_project:?} {api_dir:?}");
+    if let Some(ref processed_projects) = hyperapp_processed_projects {
+        caller_utils_generator::create_caller_utils(package_dir, &api_dir)?;
+        for processed_project in processed_projects {
+            caller_utils_generator::add_caller_utils_to_projects(&[processed_project.clone()])?;
+        }
+    }
+
+    for (path, is_rust_process, is_py_process, is_js_process) in to_compile {
         tasks.spawn(compile_package_item(
             path,
             features.clone(),
-            apis.clone(),
             wit_world.clone(),
-            metadata.properties.wit_version,
+            is_rust_process,
+            is_py_process,
+            is_js_process,
             verbose.clone(),
         ));
     }
@@ -1661,6 +1716,7 @@ pub async fn execute(
     local_dependencies: Vec<PathBuf>,
     add_paths_to_api: Vec<PathBuf>,
     rewrite: bool,
+    hyperapp: bool,
     reproducible: bool,
     force: bool,
     verbose: bool,
@@ -1753,6 +1809,23 @@ pub async fn execute(
         copy_and_rewrite_package(package_dir)?
     };
 
+    let hyperapp_processed_projects = if !hyperapp {
+        None
+    } else {
+        let api_dir = live_dir.join("api");
+        let (processed_projects, interfaces) =
+            wit_generator::generate_wit_files(&live_dir, &api_dir)?;
+
+        // generate ts bindings before building ui
+        caller_utils_ts_generator::create_typescript_caller_utils(&live_dir, &api_dir)?;
+
+        if interfaces.is_empty() {
+            None
+        } else {
+            Some(processed_projects)
+        }
+    };
+
     let ui_dirs = get_ui_dirs(&live_dir, &include, &exclude)?;
     if !no_ui && !ui_dirs.is_empty() {
         if !skip_deps_check {
@@ -1779,8 +1852,10 @@ pub async fn execute(
             &include,
             &exclude,
             rewrite,
+            hyperapp,
             force,
             verbose,
+            hyperapp_processed_projects,
             ignore_deps,
         )
         .await?;
