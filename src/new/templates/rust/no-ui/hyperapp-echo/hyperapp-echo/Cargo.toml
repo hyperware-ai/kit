@@ -1,0 +1,31 @@
+[dependencies]
+process_macros = "0.1" 
+serde_json = "1.0"
+wit-bindgen = "0.36.0"
+
+
+[dependencies.hyperprocess_macro]
+git = "https://github.com/hyperware-ai/hyperprocess-macro"
+rev = "47400ab"
+
+[dependencies.hyperware_app_common]
+git = "https://github.com/hyperware-ai/hyperprocess-macro"
+rev = "47400ab"
+
+[dependencies.serde]
+features = ["derive"]
+version = "1.0"
+
+[features]
+simulation-mode = []
+
+[lib]
+crate-type = ["cdylib"]
+
+[package]
+edition = "2021"
+name = "hyperapp-echo"
+version = "0.1.0"
+
+[package.metadata.component]
+package = "hyperware:process"

@@ -1,0 +1,20 @@
+{
+  "name": "Hyperapp Echo",
+  "description": "Echo process for Hyperapp framework.",
+  "image": "",
+  "properties": {
+    "package_name": "hyperapp-echo",
+    "current_version": "0.1.0",
+    "publisher": "template.os",
+    "mirrors": [],
+    "code_hashes": {
+      "0.1.0": ""
+    },
+    "wit_version": 1,
+    "dependencies": [  
+      "hyperapp-echo:template.os"
+    ]
+  },
+  "external_url": "https://hyperware.ai",
+  "animation_url": ""
+}

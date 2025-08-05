@@ -1,0 +1,11 @@
+[profile.release]
+lto = true
+opt-level = "s"
+panic = "abort"
+
+[workspace]
+members = [
+    "hyperapp-echo",
+    "test/hyperapp-echo-test/hyperapp-echo-test",
+]
+resolver = "2"
