@@ -404,7 +404,7 @@ async fn execute(
             let ledger = matches.get_one::<bool>("LEDGER").unwrap();
             let trezor = matches.get_one::<bool>("TREZOR").unwrap();
             let safe = matches
-                .get_one::<String>("SAFE")
+                .get_one::<String>("SAFE_CONTRACT_ADDRESS")
                 .and_then(|gs| Some(gs.as_str()));
             let rpc_uri = matches.get_one::<String>("RPC_URI").unwrap();
             let real = matches.get_one::<bool>("REAL").unwrap();
@@ -1131,11 +1131,11 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .help("Use Trezor private key (choose 1 of `k`, `l`, `t`, `s`)")
                 .required(false)
             )
-            .arg(Arg::new("SAFE")
+            .arg(Arg::new("SAFE_CONTRACT_ADDRESS")
                 .action(ArgAction::Set)
                 .short('s')
                 .long("safe")
-                .help("Safe contract address (choose 1 of `k`, `l`, `t`, `s`)")
+                .help("Create transaction for Safe (choose 1 of `k`, `l`, `t`, `s`)")
                 .required(false)
             )
             .arg(Arg::new("URI")
