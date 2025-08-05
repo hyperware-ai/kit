@@ -976,7 +976,7 @@ async fn compile_rust_wasm_process(
     } else {
         features.len()
     };
-    let features = remove_missing_features(&package_dir.join("Cargo.toml"), features)?;
+    let features = remove_missing_features(&process_dir.join("Cargo.toml"), features)?;
     if !test_only && original_length != features.len() {
         info!(
             "process {:?} missing features; using {:?}",
