@@ -1739,8 +1739,10 @@ pub async fn execute(
     reproducible={reproducible},
     force={force},
     verbose={verbose},
-    ignore_deps={ignore_deps},"
+    ignore_deps={ignore_deps},",
+        fs::canonicalize(package_dir),
     );
+    let package_dir = fs::canonicalize(package_dir)?;
     if no_ui && ui_only {
         return Err(eyre!(
             "Cannot set both `no_ui` and `ui_only` to true at the same time"
@@ -1766,7 +1768,7 @@ pub async fn execute(
             &build_with_cludes_path,
             features,
             &cludes,
-            package_dir,
+            &package_dir,
         )?
     {
         return Ok(());
@@ -1804,9 +1806,9 @@ pub async fn execute(
     //  if `!rewrite`, that is just `package_dir`;
     //  else, it is the modified copy that is in `target/rewrite/`
     let live_dir = if !rewrite {
-        PathBuf::from(package_dir)
+        PathBuf::from(&package_dir)
     } else {
-        copy_and_rewrite_package(package_dir)?
+        copy_and_rewrite_package(&package_dir)?
     };
 
     let hyperapp_processed_projects = if !hyperapp {
@@ -1868,9 +1870,9 @@ pub async fn execute(
         copy_dir(live_dir.join("pkg"), package_dir.join("pkg"))?;
     }
 
-    let metadata = read_metadata(package_dir)?;
+    let metadata = read_metadata(&package_dir)?;
     let pkg_publisher = make_pkg_publisher(&metadata);
-    let (_zip_filename, hash_string) = zip_pkg(package_dir, &pkg_publisher)?;
+    let (_zip_filename, hash_string) = zip_pkg(&package_dir, &pkg_publisher)?;
     info!("package zip hash: {hash_string}");
 
     Ok(())
