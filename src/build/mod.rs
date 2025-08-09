@@ -1739,8 +1739,7 @@ pub async fn execute(
     reproducible={reproducible},
     force={force},
     verbose={verbose},
-    ignore_deps={ignore_deps},",
-        fs::canonicalize(package_dir),
+    ignore_deps={ignore_deps},"
     );
     let package_dir = fs::canonicalize(package_dir)?;
     if no_ui && ui_only {
