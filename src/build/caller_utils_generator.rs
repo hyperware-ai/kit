@@ -913,10 +913,10 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
                 // Check if caller-utils is already in the members list
                 let caller_utils_exists = members_array
                     .iter()
-                    .any(|m| m.as_str().map_or(false, |s| s == "target/caller-utils"));
+                    .any(|m| m.as_str().map_or(false, |s| s == "target/caller-util?"));
 
                 if !caller_utils_exists {
-                    members_array.push(Value::String("target/caller-utils".to_string()));
+                    members_array.push(Value::String("target/caller-util?".to_string()));
 
                     // Write back the updated TOML
                     let updated_content = toml::to_string_pretty(&parsed_toml)
@@ -932,7 +932,7 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
                     debug!("Successfully updated workspace Cargo.toml");
                 } else {
                     debug!(
-                        "Workspace Cargo.toml already up-to-date regarding caller-utils member."
+                        "Workspace Cargo.toml already up-to-date regarding caller-util? member."
                     );
                 }
             }
@@ -979,6 +979,7 @@ pub fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
                                 "path".to_string(),
                                 Value::String("../target/caller-utils".to_string()),
                             );
+                            t.insert("optional".to_string(), Value::Boolean(true));
                             t
                         }),
                     );
