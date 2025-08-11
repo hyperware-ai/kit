@@ -1,0 +1,5 @@
+world hyperapp-echo-test-template-dot-os-v0 {
+    import hyperapp-echo;
+    import tester;
+    include process-v1;
+}

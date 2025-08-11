@@ -1,0 +1,22 @@
+{
+    "name": "Hyperapp Echo Test",
+    "description": "A test showcasing the hyperware app framework.",
+    "image": "",
+    "properties": {
+        "package_name": "hyperapp-echo-test",
+        "current_version": "0.1.0",
+        "publisher": "template.os",
+        "mirrors": [],
+        "code_hashes": {
+            "0.1.0": ""
+        },
+        "wit_version": 1,
+        "dependencies": [
+            "hyperapp-echo:template.os",
+            "tester:sys"
+        ]
+    },
+    "external_url": "",
+    "animation_url": ""
+}
+
