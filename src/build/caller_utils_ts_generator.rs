@@ -6,8 +6,16 @@ use tracing::{debug, info, instrument, warn};
 
 use walkdir::WalkDir;
 
+// Strip % prefix from WIT identifiers (used to escape keywords)
+fn strip_wit_escape(s: &str) -> &str {
+    s.strip_prefix('%').unwrap_or(s)
+}
+
 // Convert kebab-case to camelCase
 pub fn to_camel_case(s: &str) -> String {
+    // Strip % prefix if present
+    let s = strip_wit_escape(s);
+
     let parts: Vec<&str> = s.split('-').collect();
     if parts.is_empty() {
         return String::new();
@@ -29,6 +37,9 @@ pub fn to_camel_case(s: &str) -> String {
 
 // Convert kebab-case to PascalCase
 pub fn to_pascal_case(s: &str) -> String {
+    // Strip % prefix if present
+    let s = strip_wit_escape(s);
+
     let parts = s.split('-');
     let mut result = String::new();
 
@@ -180,6 +191,9 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                 .trim_end_matches(" {")
                 .trim();
 
+            // Strip % prefix if present
+            let record_name = strip_wit_escape(record_name);
+
             if record_name.contains("-signature-") {
                 // This is a signature record
                 debug!(name = %record_name, "Found signature record");
@@ -212,7 +226,7 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                     // Parse field definition
                     let field_parts: Vec<_> = field_line.split(':').collect();
                     if field_parts.len() == 2 {
-                        let field_name = field_parts[0].trim().to_string();
+                        let field_name = strip_wit_escape(field_parts[0].trim()).to_string();
                         let field_type = field_parts[1].trim().trim_end_matches(',').to_string();
 
                         debug!(name = %field_name, wit_type = %field_type, "Found field");
@@ -250,7 +264,7 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                     // Parse field definition
                     let field_parts: Vec<_> = field_line.split(':').collect();
                     if field_parts.len() == 2 {
-                        let field_name = field_parts[0].trim().to_string();
+                        let field_name = strip_wit_escape(field_parts[0].trim()).to_string();
                         let field_type = field_parts[1].trim().trim_end_matches(',').to_string();
 
                         debug!(name = %field_name, wit_type = %field_type, "Found field");
@@ -275,6 +289,9 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                 .trim_start_matches("variant ")
                 .trim_end_matches(" {")
                 .trim();
+
+            // Strip % prefix if present
+            let variant_name = strip_wit_escape(variant_name);
             debug!(name = %variant_name, "Found variant");
 
             // Parse cases
@@ -291,7 +308,13 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                 }
 
                 // Parse case - just the name, ignoring any associated data for now
-                let case_name = case_line.trim_end_matches(',').to_string();
+                let case_raw = case_line.trim_end_matches(',');
+                // Extract case name (might have associated type in parentheses)
+                let case_name = if let Some(paren_pos) = case_raw.find('(') {
+                    strip_wit_escape(&case_raw[..paren_pos]).to_string()
+                } else {
+                    strip_wit_escape(case_raw).to_string()
+                };
                 debug!(case = %case_name, "Found variant case");
                 cases.push(case_name);
 
