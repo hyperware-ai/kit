@@ -421,6 +421,7 @@ pub async fn execute(
     }
 
     let metadata_hash = check_remote_metadata(&metadata, metadata_uri, package_dir).await?;
+    info!("metadata_hash: {metadata_hash}");
     if !unpublish {
         check_pkg_hash(&metadata, package_dir, metadata_uri)?;
     }
