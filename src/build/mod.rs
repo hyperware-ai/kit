@@ -156,29 +156,36 @@ pub fn remove_missing_features(cargo_toml_path: &Path, features: Vec<&str>) -> R
     let cargo_features = cargo_toml.get("features").and_then(|f| f.as_table());
 
     // Check for optional dependencies which implicitly create features
-    let optional_deps: HashSet<String> = if let Some(dependencies) = cargo_toml.get("dependencies").and_then(|d| d.as_table()) {
-        dependencies
-            .iter()
-            .filter_map(|(name, dep)| {
-                // Check if this dependency is marked as optional
-                if let Some(dep_table) = dep.as_table() {
-                    if dep_table.get("optional").and_then(|o| o.as_bool()).unwrap_or(false) {
-                        return Some(name.clone());
+    let optional_deps: HashSet<String> =
+        if let Some(dependencies) = cargo_toml.get("dependencies").and_then(|d| d.as_table()) {
+            dependencies
+                .iter()
+                .filter_map(|(name, dep)| {
+                    // Check if this dependency is marked as optional
+                    if let Some(dep_table) = dep.as_table() {
+                        if dep_table
+                            .get("optional")
+                            .and_then(|o| o.as_bool())
+                            .unwrap_or(false)
+                        {
+                            return Some(name.clone());
+                        }
                     }
-                }
-                None
-            })
-            .collect()
-    } else {
-        HashSet::new()
-    };
+                    None
+                })
+                .collect()
+        } else {
+            HashSet::new()
+        };
 
     Ok(features
         .iter()
         .filter_map(|f| {
             let f = f.to_string();
             // Check if it's an explicit feature or an optional dependency
-            if (cargo_features.is_some() && cargo_features.unwrap().contains_key(&f)) || optional_deps.contains(&f) {
+            if (cargo_features.is_some() && cargo_features.unwrap().contains_key(&f))
+                || optional_deps.contains(&f)
+            {
                 Some(f)
             } else {
                 None
