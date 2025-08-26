@@ -98,9 +98,20 @@ pub fn make_remote_link(url: &str, text: &str) -> String {
 
 #[instrument(level = "trace", skip_all)]
 fn calculate_metadata_hash(package_dir: &Path) -> Result<String> {
-    let metadata_text = fs::read_to_string(package_dir.join("metadata.json"))?;
-    let hash = keccak256(metadata_text.as_bytes());
-    Ok(format!("0x{}", hex::encode(hash)))
+    let mut metadata_text = fs::read_to_string(package_dir.join("metadata.json"))?;
+    if !metadata_text.ends_with('\n') {
+        metadata_text.push('\n');
+    }
+    let hash = keccak_256_hash(metadata_text.as_bytes());
+    Ok(hash)
+}
+
+/// generate a Keccak-256 hash string (with 0x prefix) of the metadata bytes
+pub fn keccak_256_hash(bytes: &[u8]) -> String {
+    use sha3::{Digest, Keccak256};
+    let mut hasher = Keccak256::new();
+    hasher.update(bytes);
+    format!("0x{:x}", hasher.finalize())
 }
 
 #[instrument(level = "trace", skip_all)]
