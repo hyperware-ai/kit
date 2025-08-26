@@ -615,7 +615,6 @@ fn generate_signature_struct(
         kebab_name, attr_type
     );
 
-
     // Create struct fields that directly represent function parameters
     let mut struct_fields = Vec::new();
 
