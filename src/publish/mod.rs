@@ -98,7 +98,10 @@ pub fn make_remote_link(url: &str, text: &str) -> String {
 
 #[instrument(level = "trace", skip_all)]
 fn calculate_metadata_hash(package_dir: &Path) -> Result<String> {
-    let metadata_text = fs::read_to_string(package_dir.join("metadata.json"))?;
+    let mut metadata_text = fs::read_to_string(package_dir.join("metadata.json"))?;
+    if !metadata_text.ends_with('\n') {
+        metadata_text.push('\n');
+    }
     let hash = keccak_256_hash(metadata_text.as_bytes());
     Ok(hash)
 }
