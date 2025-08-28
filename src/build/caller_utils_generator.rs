@@ -460,7 +460,7 @@ fn generate_async_function(signature: &SignatureStruct) -> String {
     let json_params = if param_names.is_empty() {
         // No parameters case
         debug!("Generating JSON with no parameters");
-        format!("json!({{\"{}\" : {{}}}})", pascal_function_name)
+        format!("json!({{\"{}\" : null}})", pascal_function_name)
     } else if param_names.len() == 1 {
         // Single parameter case
         debug!(param = %param_names[0], "Generating JSON with single parameter");
@@ -507,9 +507,9 @@ fn create_caller_utils_crate(api_dir: &Path, base_dir: &Path) -> Result<()> {
     fs::create_dir_all(caller_utils_dir.join("src"))?;
     debug!("Created project directory structure");
 
-    // Get hyperware_app_common dependency from the process's Cargo.toml
-    let hyperware_dep = get_hyperware_app_common_dependency(base_dir)?;
-    debug!("Got hyperware_app_common dependency: {}", hyperware_dep);
+    // Get hyperware_process_lib dependency from the process's Cargo.toml
+    let hyperware_dep = get_hyperware_process_lib_dependency(base_dir)?;
+    debug!("Got hyperware_process_lib dependency: {}", hyperware_dep);
 
     // Create Cargo.toml with updated dependencies
     let cargo_toml = format!(
@@ -525,7 +525,7 @@ process_macros = "0.1.0"
 futures-util = "0.3"
 serde = {{ version = "1.0", features = ["derive"] }}
 serde_json = "1.0"
-hyperware_app_common = {}
+hyperware_process_lib = {}
 once_cell = "1.20.2"
 futures = "0.3"
 uuid = {{ version = "1.0" }}
@@ -672,9 +672,8 @@ crate-type = ["cdylib", "lib"]
     lib_rs.push_str("/// Generated caller utilities for RPC function stubs\n\n");
 
     // Add global imports
-    lib_rs.push_str("pub use hyperware_app_common::AppSendError;\n");
-    lib_rs.push_str("pub use hyperware_app_common::send;\n");
-    lib_rs.push_str("use hyperware_app_common::hyperware_process_lib as hyperware_process_lib;\n");
+    lib_rs.push_str("pub use hyperware_process_lib::hyperapp::AppSendError;\n");
+    lib_rs.push_str("pub use hyperware_process_lib::hyperapp::send;\n");
     lib_rs.push_str("pub use hyperware_process_lib::{Address, Request};\n");
     lib_rs.push_str("use serde_json::json;\n\n");
 
@@ -799,9 +798,9 @@ fn read_cargo_toml(path: &Path) -> Result<Value> {
         .with_context(|| format!("Failed to parse Cargo.toml: {}", path.display()))
 }
 
-// Get hyperware_app_common dependency from the process Cargo.toml files
+// Get hyperware_process_lib dependency from the process Cargo.toml files
 #[instrument(level = "trace", skip_all)]
-fn get_hyperware_app_common_dependency(base_dir: &Path) -> Result<String> {
+fn get_hyperware_process_lib_dependency(base_dir: &Path) -> Result<String> {
     const DEFAULT_DEP: &str =
         r#"{ git = "https://github.com/hyperware-ai/hyperprocess-macro", rev = "4c944b2" }"#;
 
@@ -813,7 +812,7 @@ fn get_hyperware_app_common_dependency(base_dir: &Path) -> Result<String> {
         .and_then(|m| m.as_array())
         .ok_or_else(|| eyre!("No workspace.members found in Cargo.toml"))?;
 
-    // Collect hyperware_app_common dependencies from all process members
+    // Collect hyperware_process_lib dependencies from all process members
     let mut found_deps = HashMap::new();
 
     for member in members.iter().filter_map(|m| m.as_str()) {
@@ -835,10 +834,10 @@ fn get_hyperware_app_common_dependency(base_dir: &Path) -> Result<String> {
 
         if let Some(dep) = member_toml
             .get("dependencies")
-            .and_then(|d| d.get("hyperware_app_common"))
+            .and_then(|d| d.get("hyperware_process_lib"))
             .and_then(format_toml_dependency)
         {
-            debug!("Found hyperware_app_common in {}: {}", member, dep);
+            debug!("Found hyperware_process_lib in {}: {}", member, dep);
             found_deps.insert(member.to_string(), dep);
         }
     }
@@ -846,12 +845,12 @@ fn get_hyperware_app_common_dependency(base_dir: &Path) -> Result<String> {
     // Handle results
     match found_deps.len() {
         0 => {
-            warn!("No hyperware_app_common dependencies found in any process, using default");
+            warn!("No hyperware_process_lib dependencies found in any process, using default");
             Ok(DEFAULT_DEP.to_string())
         }
         1 => {
             let dep = found_deps.values().next().unwrap();
-            info!("Using hyperware_app_common dependency: {}", dep);
+            info!("Using hyperware_process_lib dependency: {}", dep);
             Ok(dep.clone())
         }
         _ => {
@@ -865,13 +864,13 @@ fn get_hyperware_app_common_dependency(base_dir: &Path) -> Result<String> {
                         found_deps.iter().find(|(_, d)| *d == first_dep).unwrap();
                     let (conflict_process, _) = found_deps.iter().find(|(_, d)| *d == dep).unwrap();
                     bail!(
-                        "Conflicting hyperware_app_common versions found:\n  Process '{}': {}\n  Process '{}': {}\nAll processes must use the same version.",
+                        "Conflicting hyperware_process_lib versions found:\n  Process '{}': {}\n  Process '{}': {}\nAll processes must use the same version.",
                         first_process, first_dep, conflict_process, dep
                     );
                 }
             }
 
-            info!("Using hyperware_app_common dependency: {}", first_dep);
+            info!("Using hyperware_process_lib dependency: {}", first_dep);
             Ok(first_dep.clone())
         }
     }
@@ -913,10 +912,10 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
                 // Check if caller-utils is already in the members list
                 let caller_utils_exists = members_array
                     .iter()
-                    .any(|m| m.as_str().map_or(false, |s| s == "target/caller-utils"));
+                    .any(|m| m.as_str().map_or(false, |s| s == "target/caller-util?"));
 
                 if !caller_utils_exists {
-                    members_array.push(Value::String("target/caller-utils".to_string()));
+                    members_array.push(Value::String("target/caller-util?".to_string()));
 
                     // Write back the updated TOML
                     let updated_content = toml::to_string_pretty(&parsed_toml)
@@ -932,7 +931,7 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
                     debug!("Successfully updated workspace Cargo.toml");
                 } else {
                     debug!(
-                        "Workspace Cargo.toml already up-to-date regarding caller-utils member."
+                        "Workspace Cargo.toml already up-to-date regarding caller-util? member."
                     );
                 }
             }
@@ -979,6 +978,7 @@ pub fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
                                 "path".to_string(),
                                 Value::String("../target/caller-utils".to_string()),
                             );
+                            t.insert("optional".to_string(), Value::Boolean(true));
                             t
                         }),
                     );

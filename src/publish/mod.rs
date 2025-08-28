@@ -98,9 +98,20 @@ pub fn make_remote_link(url: &str, text: &str) -> String {
 
 #[instrument(level = "trace", skip_all)]
 fn calculate_metadata_hash(package_dir: &Path) -> Result<String> {
-    let metadata_text = fs::read_to_string(package_dir.join("metadata.json"))?;
-    let hash = keccak256(metadata_text.as_bytes());
-    Ok(format!("0x{}", hex::encode(hash)))
+    let mut metadata_text = fs::read_to_string(package_dir.join("metadata.json"))?;
+    if !metadata_text.ends_with('\n') {
+        metadata_text.push('\n');
+    }
+    let hash = keccak_256_hash(metadata_text.as_bytes());
+    Ok(hash)
+}
+
+/// generate a Keccak-256 hash string (with 0x prefix) of the metadata bytes
+pub fn keccak_256_hash(bytes: &[u8]) -> String {
+    use sha3::{Digest, Keccak256};
+    let mut hasher = Keccak256::new();
+    hasher.update(bytes);
+    format!("0x{:x}", hasher.finalize())
 }
 
 #[instrument(level = "trace", skip_all)]
@@ -309,61 +320,20 @@ async fn prepare_hypermap_put(
 }
 
 #[instrument(level = "trace", skip_all)]
-pub async fn execute(
-    package_dir: &Path,
+pub async fn build_tx(
     metadata_uri: &str,
-    keystore_path: Option<PathBuf>,
-    ledger: &bool,
-    trezor: &bool,
-    rpc_uri: &str,
+    metadata_hash: &str,
+    name: &str,
+    publisher: &str,
+    provider: &RootProvider<PubSubFrontend>,
     real: &bool,
     unpublish: &bool,
+    wallet_address: Address,
+    chain_id: u64,
     gas_limit: u64,
     max_priority_fee_per_gas: Option<u128>,
     max_fee_per_gas: Option<u128>,
-    mock: &bool,
-) -> Result<()> {
-    if !package_dir.join("pkg").exists() {
-        return Err(eyre!(
-            "Required `pkg/` dir not found within given input dir {:?} (or cwd, if none given). Please re-run targeting a package.",
-            package_dir,
-        ));
-    }
-
-    let chain_id = if *real { REAL_CHAIN_ID } else { FAKE_CHAIN_ID };
-    let (wallet_address, wallet) = match (keystore_path, *ledger, *trezor) {
-        (Some(ref kp), false, false) => read_keystore(kp)?,
-        (None, true, false) => read_ledger(chain_id).await?,
-        (None, false, true) => read_trezor(chain_id).await?,
-        _ => {
-            return Err(eyre!(
-                "Must supply one and only one of `--keystore_path`, `--ledger`, or `--trezor`"
-            ))
-        }
-    };
-
-    let metadata = read_and_update_metadata(package_dir)?;
-
-    let name = metadata.name.clone().unwrap();
-    let publisher = metadata.properties.publisher.clone();
-
-    if !is_hypermap_safe(&name, false) {
-        return Err(eyre!(
-            "The App Store requires package names have only lowercase letters, digits, and `-`s"
-        ));
-    }
-    if !is_hypermap_safe(&publisher, true) {
-        return Err(eyre!(
-            "The App Store requires publisher names have only lowercase letters, digits, `-`s, and `.`s"
-        ));
-    }
-
-    let metadata_hash = check_remote_metadata(&metadata, metadata_uri, package_dir).await?;
-    check_pkg_hash(&metadata, package_dir, metadata_uri)?;
-
-    let ws = WsConnect::new(rpc_uri);
-    let provider: RootProvider<PubSubFrontend> = ProviderBuilder::default().on_ws(ws).await?;
-
+) -> Result<(Address, Vec<u8>, TransactionRequest)> {
     let hypermap = Address::from_str(if *real {
         REAL_KIMAP_ADDRESS
     } else {
@@ -391,7 +361,7 @@ pub async fn execute(
 
         prepare_hypermap_put(
             multicall,
-            name.clone(),
+            name.to_string(),
             &publisher,
             hypermap,
             &provider,
@@ -410,7 +380,7 @@ pub async fn execute(
 
     let tx = TransactionRequest::default()
         .to(to)
-        .input(TransactionInput::new(call.into()))
+        .input(TransactionInput::new(call.clone().into()))
         .nonce(nonce)
         .with_chain_id(chain_id)
         .with_gas_limit(gas_limit)
@@ -419,21 +389,153 @@ pub async fn execute(
         )
         .with_max_fee_per_gas(max_fee_per_gas.unwrap_or_else(|| suggested_max_fee_per_gas));
 
-    let tx_envelope = tx.build(&wallet).await?;
-    let tx_encoded = tx_envelope.encoded_2718();
-    if *mock {
+    Ok((to, call, tx))
+}
+
+#[instrument(level = "trace", skip_all)]
+pub async fn execute(
+    package_dir: &Path,
+    metadata_uri: &str,
+    keystore_path: Option<PathBuf>,
+    ledger: &bool,
+    trezor: &bool,
+    safe: Option<&str>,
+    rpc_uri: &str,
+    real: &bool,
+    unpublish: &bool,
+    gas_limit: u64,
+    max_priority_fee_per_gas: Option<u128>,
+    max_fee_per_gas: Option<u128>,
+    mock: &bool,
+) -> Result<()> {
+    if !package_dir.join("pkg").exists() {
+        return Err(eyre!(
+            "Required `pkg/` dir not found within given input dir {:?} (or cwd, if none given). Please re-run targeting a package.",
+            package_dir,
+        ));
+    }
+
+    let metadata = read_and_update_metadata(package_dir)?;
+
+    let name = metadata.name.clone().unwrap();
+    let publisher = metadata.properties.publisher.clone();
+
+    if !is_hypermap_safe(&name, false) {
+        return Err(eyre!(
+            "The App Store requires package names have only lowercase letters, digits, and `-`s"
+        ));
+    }
+    if !is_hypermap_safe(&publisher, true) {
+        return Err(eyre!(
+            "The App Store requires publisher names have only lowercase letters, digits, `-`s, and `.`s"
+        ));
+    }
+
+    let metadata_hash = check_remote_metadata(&metadata, metadata_uri, package_dir).await?;
+    if !unpublish {
+        check_pkg_hash(&metadata, package_dir, metadata_uri)?;
+    }
+
+    let chain_id = if *real { REAL_CHAIN_ID } else { FAKE_CHAIN_ID };
+
+    let is_safe_tx = safe.is_some();
+
+    let (wallet_address, wallet) = if is_safe_tx {
+        // In Safe mode, we don't need a wallet for signing
+        // Parse the Safe address provided by the user
+        let safe_address = Address::from_str(safe.unwrap())?;
+        (safe_address, None)
+    } else {
+        // Traditional wallet mode
+        let (addr, wallet) = match (keystore_path, *ledger, *trezor) {
+            (Some(ref kp), false, false) => read_keystore(kp)?,
+            (None, true, false) => read_ledger(chain_id).await?,
+            (None, false, true) => read_trezor(chain_id).await?,
+            _ => {
+                return Err(eyre!(
+                    "Must supply one and only one of `--keystore_path`, `--ledger`, `--trezor`, or `--safe`"
+                ))
+            }
+        };
+        (addr, Some(wallet))
+    };
+
+    let ws = WsConnect::new(rpc_uri);
+    let provider: RootProvider<PubSubFrontend> = ProviderBuilder::default().on_ws(ws).await?;
+
+    let (to, call, tx) = build_tx(
+        metadata_uri,
+        &metadata_hash,
+        &name,
+        &publisher,
+        &provider,
+        real,
+        unpublish,
+        wallet_address,
+        chain_id,
+        gas_limit,
+        max_priority_fee_per_gas,
+        max_fee_per_gas,
+    )
+    .await?;
+
+    if is_safe_tx {
+        // Generate Safe transaction data
+        let tx_data = hex::encode(call);
+
+        // TODO: can we get URL working? If so this is by far preferable
+        //// Create Safe App URL - always use Base chain (8453)
+        //let safe_url = format!(
+        //    "https://app.safe.global/base:{}/transactions/tx?safe={}&to={}&value=0&data=0x{}",
+        //    wallet_address,
+        //    wallet_address,
+        //    to,
+        //    tx_data
+        //);
+
+        info!("=== Safe Transaction Data ===");
+        // TODO: can we get URL working? If so this is by far preferable
+        //info!("Safe App URL (click or copy):");
+        //info!("{}", make_remote_link(&safe_url, &safe_url));
+        //info!("");
+        info!("Manual Steps:");
+        info!("1. Go to your Safe at https://app.safe.global");
+        info!("2. Click \"New Transaction\" → \"Transaction Builder\"");
         info!(
-            "{} {name} tx mock successful",
-            if *unpublish { "unpublish" } else { "publish" }
+            "3. Enter the contract address in \"Enter Address or ENS Name\": {}",
+            to
+        );
+        info!("4. Toggle \"Custom data\"");
+        info!("5. Put in \"ETH value\": 0");
+        info!(
+            "6. Paste the transaction data in \"Data (Hex encoded)\": 0x{}",
+            tx_data
+        );
+        info!("7. \"Add new transaction\" -> \"Create Batch\" -> \"Simulate\"");
+        info!("8. If simulation passes, \"Send Batch\"");
+        info!("9. Collect signatures from other Safe owners");
+        info!(
+            "10. Execute once threshold is reached (transaction only goes live in this final step)"
         );
     } else {
-        let tx = provider.send_raw_transaction(&tx_encoded).await?;
-        let tx_hash = format!("{:?}", tx.tx_hash());
-        let link = make_remote_link(&format!("https://basescan.org/tx/{tx_hash}"), &tx_hash);
-        info!(
-            "{} {name} tx sent: {link}",
-            if *unpublish { "unpublish" } else { "publish" }
-        );
+        // Traditional wallet signing flow
+        let wallet = wallet.unwrap();
+        let tx_envelope = tx.build(&wallet).await?;
+        let tx_encoded = tx_envelope.encoded_2718();
+        if *mock {
+            info!(
+                "{} {name} tx mock successful",
+                if *unpublish { "unpublish" } else { "publish" }
+            );
+        } else {
+            let tx = provider.send_raw_transaction(&tx_encoded).await?;
+            let tx_hash = format!("{:?}", tx.tx_hash());
+            let link = make_remote_link(&format!("https://basescan.org/tx/{tx_hash}"), &tx_hash);
+            info!(
+                "{} {name} tx sent: {link}",
+                if *unpublish { "unpublish" } else { "publish" }
+            );
+        }
     }
     Ok(())
 }

@@ -153,15 +153,39 @@ pub fn has_feature(cargo_toml_path: &str, feature: &str) -> Result<bool> {
 pub fn remove_missing_features(cargo_toml_path: &Path, features: Vec<&str>) -> Result<Vec<String>> {
     let cargo_toml_content = fs::read_to_string(cargo_toml_path)?;
     let cargo_toml: toml::Value = cargo_toml_content.parse()?;
-    let Some(cargo_features) = cargo_toml.get("features").and_then(|f| f.as_table()) else {
-        return Ok(vec![]);
-    };
+    let cargo_features = cargo_toml.get("features").and_then(|f| f.as_table());
+
+    // Check for optional dependencies which implicitly create features
+    let optional_deps: HashSet<String> =
+        if let Some(dependencies) = cargo_toml.get("dependencies").and_then(|d| d.as_table()) {
+            dependencies
+                .iter()
+                .filter_map(|(name, dep)| {
+                    // Check if this dependency is marked as optional
+                    if let Some(dep_table) = dep.as_table() {
+                        if dep_table
+                            .get("optional")
+                            .and_then(|o| o.as_bool())
+                            .unwrap_or(false)
+                        {
+                            return Some(name.clone());
+                        }
+                    }
+                    None
+                })
+                .collect()
+        } else {
+            HashSet::new()
+        };
 
     Ok(features
         .iter()
         .filter_map(|f| {
             let f = f.to_string();
-            if cargo_features.contains_key(&f) {
+            // Check if it's an explicit feature or an optional dependency
+            if (cargo_features.is_some() && cargo_features.unwrap().contains_key(&f))
+                || optional_deps.contains(&f)
+            {
                 Some(f)
             } else {
                 None
@@ -976,7 +1000,7 @@ async fn compile_rust_wasm_process(
     } else {
         features.len()
     };
-    let features = remove_missing_features(&package_dir.join("Cargo.toml"), features)?;
+    let features = remove_missing_features(&process_dir.join("Cargo.toml"), features)?;
     if !test_only && original_length != features.len() {
         info!(
             "process {:?} missing features; using {:?}",
@@ -1741,6 +1765,7 @@ pub async fn execute(
     verbose={verbose},
     ignore_deps={ignore_deps},"
     );
+    let package_dir = fs::canonicalize(package_dir)?;
     if no_ui && ui_only {
         return Err(eyre!(
             "Cannot set both `no_ui` and `ui_only` to true at the same time"
@@ -1766,7 +1791,7 @@ pub async fn execute(
             &build_with_cludes_path,
             features,
             &cludes,
-            package_dir,
+            &package_dir,
         )?
     {
         return Ok(());
@@ -1804,9 +1829,9 @@ pub async fn execute(
     //  if `!rewrite`, that is just `package_dir`;
     //  else, it is the modified copy that is in `target/rewrite/`
     let live_dir = if !rewrite {
-        PathBuf::from(package_dir)
+        PathBuf::from(&package_dir)
     } else {
-        copy_and_rewrite_package(package_dir)?
+        copy_and_rewrite_package(&package_dir)?
     };
 
     let hyperapp_processed_projects = if !hyperapp {
@@ -1868,9 +1893,9 @@ pub async fn execute(
         copy_dir(live_dir.join("pkg"), package_dir.join("pkg"))?;
     }
 
-    let metadata = read_metadata(package_dir)?;
+    let metadata = read_metadata(&package_dir)?;
     let pkg_publisher = make_pkg_publisher(&metadata);
-    let (_zip_filename, hash_string) = zip_pkg(package_dir, &pkg_publisher)?;
+    let (_zip_filename, hash_string) = zip_pkg(&package_dir, &pkg_publisher)?;
     info!("package zip hash: {hash_string}");
 
     Ok(())
