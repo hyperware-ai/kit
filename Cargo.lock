@@ -2307,6 +2307,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sha3",
  "syn 2.0.90",
  "thiserror 1.0.63",
  "tokio",
