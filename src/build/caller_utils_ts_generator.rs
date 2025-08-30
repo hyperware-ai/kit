@@ -11,28 +11,12 @@ fn strip_wit_escape(s: &str) -> &str {
     s.strip_prefix('%').unwrap_or(s)
 }
 
-// Convert kebab-case to camelCase
-pub fn to_camel_case(s: &str) -> String {
+// Convert kebab-case to snake_case
+pub fn to_snake_case(s: &str) -> String {
     // Strip % prefix if present
     let s = strip_wit_escape(s);
 
-    let parts: Vec<&str> = s.split('-').collect();
-    if parts.is_empty() {
-        return String::new();
-    }
-
-    let mut result = parts[0].to_string();
-    for part in &parts[1..] {
-        if !part.is_empty() {
-            let mut chars = part.chars();
-            if let Some(first_char) = chars.next() {
-                result.push(first_char.to_uppercase().next().unwrap());
-                result.extend(chars);
-            }
-        }
-    }
-
-    result
+    s.chars().map(|c| if c == '-' { '_' } else { c }).collect()
 }
 
 // Convert kebab-case to PascalCase
@@ -350,7 +334,7 @@ fn generate_typescript_interface(record: &WitRecord) -> String {
     let mut fields = Vec::new();
 
     for field in &record.fields {
-        let field_name = to_camel_case(&field.name);
+        let field_name = to_snake_case(&field.name);
         let ts_type = wit_type_to_typescript(&field.wit_type);
         fields.push(format!("  {}: {};", field_name, ts_type));
     }
@@ -377,7 +361,7 @@ fn generate_typescript_variant(variant: &WitVariant) -> String {
 // Generate TypeScript interface and function from a signature struct
 fn generate_typescript_function(signature: &SignatureStruct) -> (String, String, String) {
     // Convert function name from kebab-case to camelCase
-    let camel_function_name = to_camel_case(&signature.function_name);
+    let camel_function_name = to_snake_case(&signature.function_name);
     let pascal_function_name = to_pascal_case(&signature.function_name);
 
     debug!(name = %camel_function_name, "Generating TypeScript function");
@@ -390,7 +374,7 @@ fn generate_typescript_function(signature: &SignatureStruct) -> (String, String,
     let mut unwrapped_return_type = "void".to_string();
 
     for field in &signature.fields {
-        let field_name_camel = to_camel_case(&field.name);
+        let field_name_camel = to_snake_case(&field.name);
         let ts_type = wit_type_to_typescript(&field.wit_type);
         debug!(field = %field.name, wit_type = %field.wit_type, ts_type = %ts_type, "Processing field");
 
@@ -613,7 +597,7 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
                         all_interfaces.push(interface_def);
                         all_types.push(type_def);
                         all_functions.push(function_def);
-                        function_names.push(to_camel_case(&signature.function_name));
+                        function_names.push(to_snake_case(&signature.function_name));
                     }
                 }
             }
