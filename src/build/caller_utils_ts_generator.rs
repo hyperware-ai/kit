@@ -69,9 +69,25 @@ fn wit_type_to_typescript(wit_type: &str) -> String {
         }
         t if t.starts_with("result<") => {
             let inner_part = &t[7..t.len() - 1];
-            if let Some(comma_pos) = inner_part.find(',') {
-                let ok_type = &inner_part[..comma_pos].trim();
-                let err_type = &inner_part[comma_pos + 1..].trim();
+            // Find the comma that separates Ok and Err types, handling nested generics
+            let mut depth = 0;
+            let mut comma_pos = None;
+
+            for (i, ch) in inner_part.chars().enumerate() {
+                match ch {
+                    '<' => depth += 1,
+                    '>' => depth -= 1,
+                    ',' if depth == 0 => {
+                        comma_pos = Some(i);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            if let Some(pos) = comma_pos {
+                let ok_type = inner_part[..pos].trim();
+                let err_type = inner_part[pos + 1..].trim();
                 format!(
                     "{{ Ok: {} }} | {{ Err: {} }}",
                     wit_type_to_typescript(ok_type),
@@ -86,10 +102,38 @@ fn wit_type_to_typescript(wit_type: &str) -> String {
         }
         t if t.starts_with("tuple<") => {
             let inner_types = &t[6..t.len() - 1];
-            let ts_types: Vec<String> = inner_types
-                .split(", ")
-                .map(|t| wit_type_to_typescript(t))
-                .collect();
+            // Parse tuple elements correctly, handling nested generics
+            let mut elements = Vec::new();
+            let mut current = String::new();
+            let mut depth = 0;
+
+            for ch in inner_types.chars() {
+                match ch {
+                    '<' => {
+                        depth += 1;
+                        current.push(ch);
+                    }
+                    '>' => {
+                        depth -= 1;
+                        current.push(ch);
+                    }
+                    ',' if depth == 0 => {
+                        // Only split on commas at the top level
+                        elements.push(current.trim().to_string());
+                        current.clear();
+                    }
+                    _ => {
+                        current.push(ch);
+                    }
+                }
+            }
+            // Don't forget the last element
+            if !current.trim().is_empty() {
+                elements.push(current.trim().to_string());
+            }
+
+            let ts_types: Vec<String> =
+                elements.iter().map(|t| wit_type_to_typescript(t)).collect();
             format!("[{}]", ts_types.join(", "))
         }
         // Custom types (in kebab-case) need to be converted to PascalCase
@@ -101,8 +145,24 @@ fn wit_type_to_typescript(wit_type: &str) -> String {
 fn extract_result_ok_type(wit_type: &str) -> Option<String> {
     if wit_type.starts_with("result<") {
         let inner_part = &wit_type[7..wit_type.len() - 1];
-        if let Some(comma_pos) = inner_part.find(',') {
-            let ok_type = inner_part[..comma_pos].trim();
+        // Find the comma that separates Ok and Err types, handling nested generics
+        let mut depth = 0;
+        let mut comma_pos = None;
+
+        for (i, ch) in inner_part.chars().enumerate() {
+            match ch {
+                '<' => depth += 1,
+                '>' => depth -= 1,
+                ',' if depth == 0 => {
+                    comma_pos = Some(i);
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(pos) = comma_pos {
+            let ok_type = inner_part[..pos].trim();
             Some(wit_type_to_typescript(ok_type))
         } else {
             // Result with no error type
