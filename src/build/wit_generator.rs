@@ -934,7 +934,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             let has_ws_client = method.attrs.iter().any(|a| a.path().is_ident("ws_client"));
             let has_eth = method.attrs.iter().any(|a| a.path().is_ident("eth"));
 
-            if has_remote || has_local || has_http || has_init || has_ws || has_ws_client || has_eth {
+            if has_remote || has_local || has_http || has_init || has_ws || has_ws_client || has_eth
+            {
                 debug!(remote=%has_remote, local=%has_local, http=%has_http, init=%has_init, ws=%has_ws, ws_client=%has_ws_client, "Method attributes found");
                 // Validate original Rust function name
                 validate_name(&method_name, "Function")?; // Error early if name invalid
