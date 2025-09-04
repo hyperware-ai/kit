@@ -932,9 +932,10 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             let has_init = method.attrs.iter().any(|a| a.path().is_ident("init"));
             let has_ws = method.attrs.iter().any(|a| a.path().is_ident("ws"));
             let has_ws_client = method.attrs.iter().any(|a| a.path().is_ident("ws_client"));
+            let has_terminal = method.attrs.iter().any(|a| a.path().is_ident("terminal"));
 
-            if has_remote || has_local || has_http || has_init || has_ws || has_ws_client {
-                debug!(remote=%has_remote, local=%has_local, http=%has_http, init=%has_init, ws=%has_ws, ws_client=%has_ws_client, "Method attributes found");
+            if has_remote || has_local || has_http || has_init || has_ws || has_ws_client || has_terminal {
+                debug!(remote=%has_remote, local=%has_local, http=%has_http, init=%has_init, ws=%has_ws, ws_client=%has_ws_client, terminal=%has_terminal, "Method attributes found");
                 // Validate original Rust function name
                 validate_name(&method_name, "Function")?; // Error early if name invalid
                 let func_kebab_name = to_kebab_case(&method_name);
@@ -951,6 +952,11 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
                 if has_ws_client {
                     debug!(method_name = %method_name, "Found [ws_client] function, skipping signature generation (websocket handlers are ignored by WIT generator)");
+                    continue;
+                }
+
+                if has_terminal {
+                    debug!(method_name = %method_name, "Found [terminal] function, skipping signature generation (terminal handlers are ignored by WIT generator)");
                     continue;
                 }
 
@@ -986,7 +992,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             } else {
                 // Method in hyperprocess impl lacks required attribute - Error
                 return Err(eyre!(
-                         "Method '{}' in the #[hyperprocess] impl block is missing a required attribute ([remote], [local], [http], [init], [ws] or [ws_client]). Only methods with these attributes should be included.",
+                         "Method '{}' in the #[hyperprocess] impl block is missing a required attribute ([remote], [local], [http], [init], [ws], [ws_client], or [terminal]). Only methods with these attributes should be included.",
                          method_name
                      ));
             }
