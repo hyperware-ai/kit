@@ -6,29 +6,24 @@ use tracing::{debug, info, instrument, warn};
 
 use walkdir::WalkDir;
 
-// Convert kebab-case to camelCase
-pub fn to_camel_case(s: &str) -> String {
-    let parts: Vec<&str> = s.split('-').collect();
-    if parts.is_empty() {
-        return String::new();
-    }
+// Strip % prefix from WIT identifiers (used to escape keywords)
+fn strip_wit_escape(s: &str) -> &str {
+    s.strip_prefix('%').unwrap_or(s)
+}
 
-    let mut result = parts[0].to_string();
-    for part in &parts[1..] {
-        if !part.is_empty() {
-            let mut chars = part.chars();
-            if let Some(first_char) = chars.next() {
-                result.push(first_char.to_uppercase().next().unwrap());
-                result.extend(chars);
-            }
-        }
-    }
+// Convert kebab-case to snake_case
+pub fn to_snake_case(s: &str) -> String {
+    // Strip % prefix if present
+    let s = strip_wit_escape(s);
 
-    result
+    s.chars().map(|c| if c == '-' { '_' } else { c }).collect()
 }
 
 // Convert kebab-case to PascalCase
 pub fn to_pascal_case(s: &str) -> String {
+    // Strip % prefix if present
+    let s = strip_wit_escape(s);
+
     let parts = s.split('-');
     let mut result = String::new();
 
@@ -74,9 +69,25 @@ fn wit_type_to_typescript(wit_type: &str) -> String {
         }
         t if t.starts_with("result<") => {
             let inner_part = &t[7..t.len() - 1];
-            if let Some(comma_pos) = inner_part.find(',') {
-                let ok_type = &inner_part[..comma_pos].trim();
-                let err_type = &inner_part[comma_pos + 1..].trim();
+            // Find the comma that separates Ok and Err types, handling nested generics
+            let mut depth = 0;
+            let mut comma_pos = None;
+
+            for (i, ch) in inner_part.chars().enumerate() {
+                match ch {
+                    '<' => depth += 1,
+                    '>' => depth -= 1,
+                    ',' if depth == 0 => {
+                        comma_pos = Some(i);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            if let Some(pos) = comma_pos {
+                let ok_type = inner_part[..pos].trim();
+                let err_type = inner_part[pos + 1..].trim();
                 format!(
                     "{{ Ok: {} }} | {{ Err: {} }}",
                     wit_type_to_typescript(ok_type),
@@ -91,10 +102,38 @@ fn wit_type_to_typescript(wit_type: &str) -> String {
         }
         t if t.starts_with("tuple<") => {
             let inner_types = &t[6..t.len() - 1];
-            let ts_types: Vec<String> = inner_types
-                .split(", ")
-                .map(|t| wit_type_to_typescript(t))
-                .collect();
+            // Parse tuple elements correctly, handling nested generics
+            let mut elements = Vec::new();
+            let mut current = String::new();
+            let mut depth = 0;
+
+            for ch in inner_types.chars() {
+                match ch {
+                    '<' => {
+                        depth += 1;
+                        current.push(ch);
+                    }
+                    '>' => {
+                        depth -= 1;
+                        current.push(ch);
+                    }
+                    ',' if depth == 0 => {
+                        // Only split on commas at the top level
+                        elements.push(current.trim().to_string());
+                        current.clear();
+                    }
+                    _ => {
+                        current.push(ch);
+                    }
+                }
+            }
+            // Don't forget the last element
+            if !current.trim().is_empty() {
+                elements.push(current.trim().to_string());
+            }
+
+            let ts_types: Vec<String> =
+                elements.iter().map(|t| wit_type_to_typescript(t)).collect();
             format!("[{}]", ts_types.join(", "))
         }
         // Custom types (in kebab-case) need to be converted to PascalCase
@@ -106,8 +145,24 @@ fn wit_type_to_typescript(wit_type: &str) -> String {
 fn extract_result_ok_type(wit_type: &str) -> Option<String> {
     if wit_type.starts_with("result<") {
         let inner_part = &wit_type[7..wit_type.len() - 1];
-        if let Some(comma_pos) = inner_part.find(',') {
-            let ok_type = inner_part[..comma_pos].trim();
+        // Find the comma that separates Ok and Err types, handling nested generics
+        let mut depth = 0;
+        let mut comma_pos = None;
+
+        for (i, ch) in inner_part.chars().enumerate() {
+            match ch {
+                '<' => depth += 1,
+                '>' => depth -= 1,
+                ',' if depth == 0 => {
+                    comma_pos = Some(i);
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(pos) = comma_pos {
+            let ok_type = inner_part[..pos].trim();
             Some(wit_type_to_typescript(ok_type))
         } else {
             // Result with no error type
@@ -180,6 +235,9 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                 .trim_end_matches(" {")
                 .trim();
 
+            // Strip % prefix if present
+            let record_name = strip_wit_escape(record_name);
+
             if record_name.contains("-signature-") {
                 // This is a signature record
                 debug!(name = %record_name, "Found signature record");
@@ -212,7 +270,7 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                     // Parse field definition
                     let field_parts: Vec<_> = field_line.split(':').collect();
                     if field_parts.len() == 2 {
-                        let field_name = field_parts[0].trim().to_string();
+                        let field_name = strip_wit_escape(field_parts[0].trim()).to_string();
                         let field_type = field_parts[1].trim().trim_end_matches(',').to_string();
 
                         debug!(name = %field_name, wit_type = %field_type, "Found field");
@@ -250,7 +308,7 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                     // Parse field definition
                     let field_parts: Vec<_> = field_line.split(':').collect();
                     if field_parts.len() == 2 {
-                        let field_name = field_parts[0].trim().to_string();
+                        let field_name = strip_wit_escape(field_parts[0].trim()).to_string();
                         let field_type = field_parts[1].trim().trim_end_matches(',').to_string();
 
                         debug!(name = %field_name, wit_type = %field_type, "Found field");
@@ -275,6 +333,9 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                 .trim_start_matches("variant ")
                 .trim_end_matches(" {")
                 .trim();
+
+            // Strip % prefix if present
+            let variant_name = strip_wit_escape(variant_name);
             debug!(name = %variant_name, "Found variant");
 
             // Parse cases
@@ -291,7 +352,13 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                 }
 
                 // Parse case - just the name, ignoring any associated data for now
-                let case_name = case_line.trim_end_matches(',').to_string();
+                let case_raw = case_line.trim_end_matches(',');
+                // Extract case name (might have associated type in parentheses)
+                let case_name = if let Some(paren_pos) = case_raw.find('(') {
+                    strip_wit_escape(&case_raw[..paren_pos]).to_string()
+                } else {
+                    strip_wit_escape(case_raw).to_string()
+                };
                 debug!(case = %case_name, "Found variant case");
                 cases.push(case_name);
 
@@ -327,7 +394,7 @@ fn generate_typescript_interface(record: &WitRecord) -> String {
     let mut fields = Vec::new();
 
     for field in &record.fields {
-        let field_name = to_camel_case(&field.name);
+        let field_name = to_snake_case(&field.name);
         let ts_type = wit_type_to_typescript(&field.wit_type);
         fields.push(format!("  {}: {};", field_name, ts_type));
     }
@@ -354,7 +421,7 @@ fn generate_typescript_variant(variant: &WitVariant) -> String {
 // Generate TypeScript interface and function from a signature struct
 fn generate_typescript_function(signature: &SignatureStruct) -> (String, String, String) {
     // Convert function name from kebab-case to camelCase
-    let camel_function_name = to_camel_case(&signature.function_name);
+    let camel_function_name = to_snake_case(&signature.function_name);
     let pascal_function_name = to_pascal_case(&signature.function_name);
 
     debug!(name = %camel_function_name, "Generating TypeScript function");
@@ -367,7 +434,7 @@ fn generate_typescript_function(signature: &SignatureStruct) -> (String, String,
     let mut unwrapped_return_type = "void".to_string();
 
     for field in &signature.fields {
-        let field_name_camel = to_camel_case(&field.name);
+        let field_name_camel = to_snake_case(&field.name);
         let ts_type = wit_type_to_typescript(&field.wit_type);
         debug!(field = %field.name, wit_type = %field.wit_type, ts_type = %ts_type, "Processing field");
 
@@ -590,7 +657,7 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
                         all_interfaces.push(interface_def);
                         all_types.push(type_def);
                         all_functions.push(function_def);
-                        function_names.push(to_camel_case(&signature.function_name));
+                        function_names.push(to_snake_case(&signature.function_name));
                     }
                 }
             }
