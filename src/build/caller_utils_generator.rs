@@ -403,10 +403,20 @@ fn generate_async_function(signature: &SignatureStruct) -> Option<String> {
 // Create the caller-utils crate with a single lib.rs file
 #[instrument(level = "trace", skip_all)]
 fn create_caller_utils_crate(api_dir: &Path, base_dir: &Path) -> Result<()> {
+    // Extract package name from base directory
+    let package_name = base_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| eyre!("Could not extract package name from base directory"))?;
+
+    // Create crate name by prepending package name
+    let crate_name = format!("{}-caller-utils", package_name);
+
     // Path to the new crate
-    let caller_utils_dir = base_dir.join("target").join("caller-utils");
+    let caller_utils_dir = base_dir.join("target").join(&crate_name);
     debug!(
         path = %caller_utils_dir.display(),
+        crate_name = %crate_name,
         "Creating caller-utils crate"
     );
 
@@ -422,7 +432,7 @@ fn create_caller_utils_crate(api_dir: &Path, base_dir: &Path) -> Result<()> {
     // Create Cargo.toml with updated dependencies
     let cargo_toml = format!(
         r#"[package]
-name = "caller-utils"
+name = "{}"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -442,13 +452,14 @@ wit-bindgen = "0.41.0"
 [lib]
 crate-type = ["cdylib", "lib"]
 "#,
+        crate_name.replace("-", "_"),
         hyperware_dep
     );
 
     fs::write(caller_utils_dir.join("Cargo.toml"), cargo_toml)
-        .with_context(|| "Failed to write caller-utils Cargo.toml")?;
+        .with_context(|| format!("Failed to write {} Cargo.toml", crate_name))?;
 
-    debug!("Created Cargo.toml for caller-utils");
+    debug!("Created Cargo.toml for {}", crate_name);
 
     // Get the world name (preferably the types- version)
     let world_names = find_world_names(api_dir)?;
@@ -787,7 +798,7 @@ fn get_hyperware_process_lib_dependency(base_dir: &Path) -> Result<String> {
 
 // Update workspace Cargo.toml to include the caller-utils crate
 #[instrument(level = "trace", skip_all)]
-fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
+fn update_workspace_cargo_toml(base_dir: &Path, crate_name: &str) -> Result<()> {
     let workspace_cargo_toml = base_dir.join("Cargo.toml");
     debug!(
         path = %workspace_cargo_toml.display(),
@@ -819,12 +830,15 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
         if let Some(members) = workspace.get_mut("members") {
             if let Some(members_array) = members.as_array_mut() {
                 // Check if caller-utils is already in the members list
+                // Using a `?` forces cargo to interpret it as optional, which allows building from scratch (i.e. before caller-utils has been generated)
+                let crate_name_without_s = crate_name.trim_end_matches('s');
+                let target_path = format!("target/{}?", crate_name_without_s);
                 let caller_utils_exists = members_array
                     .iter()
-                    .any(|m| m.as_str().map_or(false, |s| s == "target/caller-util?"));
+                    .any(|m| m.as_str().map_or(false, |s| s == target_path));
 
                 if !caller_utils_exists {
-                    members_array.push(Value::String("target/caller-util?".to_string()));
+                    members_array.push(Value::String(target_path.clone()));
 
                     // Write back the updated TOML
                     let updated_content = toml::to_string_pretty(&parsed_toml)
@@ -840,7 +854,8 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
                     debug!("Successfully updated workspace Cargo.toml");
                 } else {
                     debug!(
-                        "Workspace Cargo.toml already up-to-date regarding caller-util? member."
+                        "Workspace Cargo.toml already up-to-date regarding {} member.",
+                        target_path
                     );
                 }
             }
@@ -852,7 +867,16 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
 
 // Add caller-utils as a dependency to hyperware:process crates
 #[instrument(level = "trace", skip_all)]
-pub fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
+pub fn add_caller_utils_to_projects(projects: &[PathBuf], base_dir: &Path) -> Result<()> {
+    // Extract package name from base directory
+    let package_name = base_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| eyre!("Could not extract package name from base directory"))?;
+
+    // Create crate name by prepending package name
+    let crate_name = format!("{}-caller-utils", package_name);
+    let crate_name_underscore = crate_name.replace("-", "_");
     for project_path in projects {
         let cargo_toml_path = project_path.join("Cargo.toml");
         debug!(
@@ -878,42 +902,75 @@ pub fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
         // Add caller-utils to dependencies if not already present
         if let Some(dependencies) = parsed_toml.get_mut("dependencies") {
             if let Some(deps_table) = dependencies.as_table_mut() {
-                if !deps_table.contains_key("caller-utils") {
+                if !deps_table.contains_key(&crate_name_underscore) {
                     deps_table.insert(
-                        "caller-utils".to_string(),
+                        crate_name_underscore.clone(),
                         Value::Table({
                             let mut t = toml::map::Map::new();
                             t.insert(
                                 "path".to_string(),
-                                Value::String("../target/caller-utils".to_string()),
+                                Value::String(format!("../target/{}", crate_name)),
                             );
                             t.insert("optional".to_string(), Value::Boolean(true));
                             t
                         }),
                     );
 
-                    // Write back the updated TOML
-                    let updated_content =
-                        toml::to_string_pretty(&parsed_toml).with_context(|| {
-                            format!(
-                                "Failed to serialize updated project Cargo.toml: {}",
-                                cargo_toml_path.display()
-                            )
-                        })?;
-
-                    fs::write(&cargo_toml_path, updated_content).with_context(|| {
-                        format!(
-                            "Failed to write updated project Cargo.toml: {}",
-                            cargo_toml_path.display()
-                        )
-                    })?;
-
-                    debug!(project = ?project_path.file_name().unwrap_or_default(), "Successfully added caller-utils dependency");
+                    debug!(project = ?project_path.file_name().unwrap_or_default(), "Successfully added {} dependency", crate_name_underscore);
                 } else {
-                    debug!(project = ?project_path.file_name().unwrap_or_default(), "caller-utils dependency already exists");
+                    debug!(project = ?project_path.file_name().unwrap_or_default(), "{} dependency already exists", crate_name_underscore);
                 }
             }
         }
+
+        // Add or update the features section to include caller-utils feature
+        if !parsed_toml.as_table().unwrap().contains_key("features") {
+            parsed_toml
+                .as_table_mut()
+                .unwrap()
+                .insert("features".to_string(), Value::Table(toml::map::Map::new()));
+        }
+
+        if let Some(features) = parsed_toml.get_mut("features") {
+            if let Some(features_table) = features.as_table_mut() {
+                // Add caller-utils feature that enables the package-specific caller-utils dependency
+                if !features_table.contains_key("caller-utils") {
+                    features_table.insert(
+                        "caller-utils".to_string(),
+                        Value::Array(vec![Value::String(crate_name_underscore.clone())]),
+                    );
+                    debug!(project = ?project_path.file_name().unwrap_or_default(), "Added caller-utils feature");
+                } else {
+                    // Update existing caller-utils feature if it doesn't include our dependency
+                    if let Some(caller_utils_feature) = features_table.get_mut("caller-utils") {
+                        if let Some(feature_array) = caller_utils_feature.as_array_mut() {
+                            let dep_exists = feature_array
+                                .iter()
+                                .any(|v| v.as_str().map_or(false, |s| s == crate_name_underscore));
+                            if !dep_exists {
+                                feature_array.push(Value::String(crate_name_underscore.clone()));
+                                debug!(project = ?project_path.file_name().unwrap_or_default(), "Updated caller-utils feature to include {}", crate_name_underscore);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Write back the updated TOML
+        let updated_content = toml::to_string_pretty(&parsed_toml).with_context(|| {
+            format!(
+                "Failed to serialize updated project Cargo.toml: {}",
+                cargo_toml_path.display()
+            )
+        })?;
+
+        fs::write(&cargo_toml_path, updated_content).with_context(|| {
+            format!(
+                "Failed to write updated project Cargo.toml: {}",
+                cargo_toml_path.display()
+            )
+        })?;
     }
 
     Ok(())
@@ -922,12 +979,21 @@ pub fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
 // Create caller-utils crate and integrate with the workspace
 #[instrument(level = "trace", skip_all)]
 pub fn create_caller_utils(base_dir: &Path, api_dir: &Path) -> Result<()> {
+    // Extract package name from base directory
+    let package_name = base_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| eyre!("Could not extract package name from base directory"))?;
+
+    // Create crate name by prepending package name
+    let crate_name = format!("{}-caller-utils", package_name);
+
     // Step 1: Create the caller-utils crate
     create_caller_utils_crate(api_dir, base_dir)?;
 
     // Step 2: Update workspace Cargo.toml
-    update_workspace_cargo_toml(base_dir)?;
+    update_workspace_cargo_toml(base_dir, &crate_name)?;
 
-    info!("Successfully created caller-utils and copied the imports");
+    info!("Successfully created {} and copied the imports", crate_name);
     Ok(())
 }

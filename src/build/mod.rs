@@ -1649,7 +1649,10 @@ async fn compile_package(
     if let Some(ref processed_projects) = hyperapp_processed_projects {
         caller_utils_generator::create_caller_utils(package_dir, &api_dir)?;
         for processed_project in processed_projects {
-            caller_utils_generator::add_caller_utils_to_projects(&[processed_project.clone()])?;
+            caller_utils_generator::add_caller_utils_to_projects(
+                &[processed_project.clone()],
+                package_dir,
+            )?;
         }
     }
 
