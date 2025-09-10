@@ -3,23 +3,23 @@ use std::env;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use crate::clean::execute as clean_execute;
 use clap::{builder::PossibleValuesParser, command, value_parser, Arg, ArgAction, Command};
 use color_eyre::{
     eyre::{eyre, Result},
     Section,
 };
 use fs_err as fs;
+use kit::{
+    boot_fake_node, boot_real_node, build, build_start_package, chain, clean, connect, dev_ui,
+    inject_message, new, publish, remove_package, reset_cache, run_tests, setup, start_package,
+    update, view_api, KIT_LOG_PATH_DEFAULT,
+};
 use serde::Deserialize;
 use tracing::{error, instrument, warn, Level};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
     filter, fmt, layer::SubscriberExt, prelude::*, util::SubscriberInitExt, EnvFilter,
-};
-use crate::clean::execute as clean_execute;
-use kit::{
-    boot_fake_node, boot_real_node, clean, build, build_start_package, chain, connect, dev_ui,
-    inject_message, new, publish, remove_package, reset_cache, run_tests, setup, start_package,
-    update, view_api, KIT_LOG_PATH_DEFAULT,
 };
 
 const MAX_REMOTE_VALUES: usize = 3;
@@ -206,7 +206,6 @@ async fn execute(
             )
             .await
         }
-        
 
         Some(("clean", matches)) => {
             let package_dir = PathBuf::from(matches.get_one::<String>("DIR").unwrap());
