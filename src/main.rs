@@ -15,9 +15,9 @@ use tracing_error::ErrorLayer;
 use tracing_subscriber::{
     filter, fmt, layer::SubscriberExt, prelude::*, util::SubscriberInitExt, EnvFilter,
 };
-
+use crate::clean::execute as clean_execute;
 use kit::{
-    boot_fake_node, boot_real_node, build, build_start_package, chain, connect, dev_ui,
+    boot_fake_node, boot_real_node, clean, build, build_start_package, chain, connect, dev_ui,
     inject_message, new, publish, remove_package, reset_cache, run_tests, setup, start_package,
     update, view_api, KIT_LOG_PATH_DEFAULT,
 };
@@ -206,6 +206,13 @@ async fn execute(
             )
             .await
         }
+        
+
+        Some(("clean", matches)) => {
+            let package_dir = PathBuf::from(matches.get_one::<String>("DIR").unwrap());
+            clean_execute(&package_dir)
+        }
+
         Some(("build", matches)) => {
             let package_dir = PathBuf::from(matches.get_one::<String>("DIR").unwrap());
             let no_ui = matches.get_one::<bool>("NO_UI").unwrap();
@@ -704,6 +711,22 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .required(false)
             )
         )
+        .subcommand(Command::new("clean")
+            .about("Remove the target directory")
+            .arg(Arg::new("DIR")
+                .action(ArgAction::Set)
+                .help("The package directory to build")
+                .default_value(current_dir)
+            )
+            .arg(Arg::new("VERBOSITY")
+                .action(ArgAction::Set)
+                .long("verbosity")
+                .help("Use verbose output (-vv very verbose/build.rs output)")
+                .default_value("0")
+                .value_parser(value_parser!(u8))
+            )
+        )
+
         .subcommand(Command::new("build")
             .about("Build a Hyperware package")
             .visible_alias("b")
