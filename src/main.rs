@@ -481,7 +481,8 @@ async fn execute(
                 *foundry_optional,
                 *javascript_optional,
                 *verbose,
-            ).await
+            )
+            .await
         }
         Some(("start-package", matches)) => {
             let package_dir = PathBuf::from(matches.get_one::<String>("DIR").unwrap());
