@@ -48,6 +48,13 @@ impl std::fmt::Display for Dependency {
     }
 }
 
+// use Display
+impl std::fmt::Debug for Dependency {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
 // hack to allow definition of Display
 struct Dependencies(Vec<Dependency>);
 impl std::fmt::Display for Dependencies {
@@ -347,11 +354,11 @@ pub fn check_foundry_deps() -> Result<Vec<Dependency>> {
     Ok(vec![])
 }
 
-/// install forge+anvil+others, could be separated into binary extractions from github releases.
+/// install Foundry, could be separated into binary extractions from github releases.
 #[instrument(level = "trace", skip_all)]
 fn install_foundry(verbose: bool) -> Result<()> {
     let download_cmd = "curl -L https://foundry.paradigm.xyz | bash";
-    let install_cmd = ". ~/.bashrc && foundryup";
+    let install_cmd = "export PATH=\"$PATH:$HOME/.foundry/bin\" && foundryup";
     run_command(Command::new("bash").args(&["-c", download_cmd]), verbose)?;
     run_command(Command::new("bash").args(&["-c", install_cmd]), verbose)?;
 
@@ -466,13 +473,48 @@ pub async fn get_deps(
 }
 
 #[instrument(level = "trace", skip_all)]
-pub async fn execute(recv_kill: &mut BroadcastRecvBool, verbose: bool) -> Result<()> {
+pub async fn execute(
+    recv_kill: &mut BroadcastRecvBool,
+    docker_optional: bool,
+    python_optional: bool,
+    foundry_optional: bool,
+    javascript_optional: bool,
+    verbose: bool,
+) -> Result<()> {
     info!("Setting up...");
 
-    check_py_deps()?;
-    let mut missing_deps = check_js_deps()?;
-    missing_deps.append(&mut check_rust_deps()?);
-    missing_deps.append(&mut check_docker_deps()?);
+    let py_result = check_py_deps();
+    if !python_optional {
+        py_result?;
+    } else {
+        if let Err(e) = py_result {
+            warn!("Python deps are not satisfied: {e}");
+        }
+    }
+
+    let mut missing_deps = check_rust_deps()?;
+
+    let mut js_deps = check_js_deps()?;
+    if !javascript_optional {
+        missing_deps.append(&mut js_deps);
+    } else {
+        warn!("JavaScript deps are not satisfied: {js_deps:?}");
+    }
+
+    let mut docker_deps = check_docker_deps()?;
+    if !docker_optional {
+        missing_deps.append(&mut docker_deps);
+    } else {
+        warn!("Docker deps are not satisfied: {docker_deps:?}");
+    }
+
+    let mut foundry_deps = check_foundry_deps()?;
+    if !foundry_optional {
+        missing_deps.append(&mut foundry_deps);
+    } else {
+        warn!("Foundry deps are not satisfied: {foundry_deps:?}");
+    }
+
     get_deps(missing_deps, recv_kill, verbose).await?;
 
     info!("Done setting up.");

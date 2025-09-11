@@ -468,9 +468,20 @@ async fn execute(
         }
         Some(("setup", matches)) => {
             let verbose = matches.get_one::<bool>("VERBOSE").unwrap();
+            let docker_optional = matches.get_one::<bool>("DOCKER_OPTIONAL").unwrap();
+            let python_optional = matches.get_one::<bool>("PYTHON_OPTIONAL").unwrap();
+            let foundry_optional = matches.get_one::<bool>("FOUNDRY_OPTIONAL").unwrap();
+            let javascript_optional = matches.get_one::<bool>("JAVASCRIPT_OPTIONAL").unwrap();
 
             let mut recv_kill = build::make_fake_kill_chan();
-            setup::execute(&mut recv_kill, *verbose).await
+            setup::execute(
+                &mut recv_kill,
+                *docker_optional,
+                *python_optional,
+                *foundry_optional,
+                *javascript_optional,
+                *verbose,
+            ).await
         }
         Some(("start-package", matches)) => {
             let package_dir = PathBuf::from(matches.get_one::<String>("DIR").unwrap());
@@ -1247,6 +1258,34 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .short('v')
                 .long("verbose")
                 .help("If set, output stdout and stderr")
+                .required(false)
+            )
+            .arg(Arg::new("DOCKER_OPTIONAL")
+                .action(ArgAction::SetTrue)
+                .short('d')
+                .long("docker-optional")
+                .help("If set, don't require Docker dep (just warn if missing)")
+                .required(false)
+            )
+            .arg(Arg::new("PYTHON_OPTIONAL")
+                .action(ArgAction::SetTrue)
+                .short('p')
+                .long("python-optional")
+                .help("If set, don't require Python dep (just warn if missing)")
+                .required(false)
+            )
+            .arg(Arg::new("FOUNDRY_OPTIONAL")
+                .action(ArgAction::SetTrue)
+                .short('f')
+                .long("foundry-optional")
+                .help("If set, don't require Foundry dep (just warn if missing)")
+                .required(false)
+            )
+            .arg(Arg::new("JAVASCRIPT_OPTIONAL")
+                .action(ArgAction::SetTrue)
+                .short('j')
+                .long("javascript-optional")
+                .help("If set, don't require Javascript deps (just warn if missing)")
                 .required(false)
             )
         )
