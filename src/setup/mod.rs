@@ -501,11 +501,13 @@ pub async fn execute(
         warn!("JavaScript deps are not satisfied: {js_deps:?}");
     }
 
-    let mut docker_deps = check_docker_deps()?;
+    let docker_result = check_docker_deps();
     if !docker_optional {
-        missing_deps.append(&mut docker_deps);
+        missing_deps.append(&mut docker_result?);
     } else {
-        warn!("Docker deps are not satisfied: {docker_deps:?}");
+        if let Err(e) = docker_result {
+            warn!("Docker deps are not satisfied: {e}");
+        }
     }
 
     let mut foundry_deps = check_foundry_deps()?;
