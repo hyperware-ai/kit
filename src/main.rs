@@ -472,6 +472,7 @@ async fn execute(
             let python_optional = matches.get_one::<bool>("PYTHON_OPTIONAL").unwrap();
             let foundry_optional = matches.get_one::<bool>("FOUNDRY_OPTIONAL").unwrap();
             let javascript_optional = matches.get_one::<bool>("JAVASCRIPT_OPTIONAL").unwrap();
+            let non_interactive = matches.get_one::<bool>("NON_INTERACTIVE").unwrap();
 
             let mut recv_kill = build::make_fake_kill_chan();
             setup::execute(
@@ -480,6 +481,7 @@ async fn execute(
                 *python_optional,
                 *foundry_optional,
                 *javascript_optional,
+                *non_interactive,
                 *verbose,
             )
             .await
@@ -1287,6 +1289,12 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .short('j')
                 .long("javascript-optional")
                 .help("If set, don't require Javascript deps (just warn if missing)")
+                .required(false)
+            )
+            .arg(Arg::new("NON_INTERACTIVE")
+                .action(ArgAction::SetTrue)
+                .long("non-interactive")
+                .help("If set, do not prompt and instead always reply `Y` to prompts (i.e. automatically install dependencies without user input)")
                 .required(false)
             )
         )

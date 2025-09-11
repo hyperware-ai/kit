@@ -257,7 +257,7 @@ pub async fn start_chain(
     tracing: bool,
 ) -> Result<Option<Child>> {
     let deps = check_foundry_deps()?;
-    get_deps(deps, &mut recv_kill, verbose).await?;
+    get_deps(deps, &mut recv_kill, false, verbose).await?;
 
     info!("Checking for Anvil on port {}...", port);
     if wait_for_anvil(port, 1, None).await.is_ok() {
