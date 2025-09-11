@@ -411,7 +411,7 @@ pub async fn get_deps(
         return Ok(());
     }
 
-    if !non_interactive {
+    if non_interactive {
         install_deps(deps, verbose)?;
     } else {
         // If setup required, request user permission
