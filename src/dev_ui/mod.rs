@@ -17,7 +17,7 @@ pub async fn execute(
     if !skip_deps_check {
         let deps = check_js_deps()?;
         let mut recv_kill = make_fake_kill_chan();
-        get_deps(deps, &mut recv_kill, false).await?;
+        get_deps(deps, &mut recv_kill, false, false).await?;
     }
     let valid_node = get_newest_valid_node_version(None, None)?;
 

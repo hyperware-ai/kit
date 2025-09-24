@@ -1469,14 +1469,14 @@ async fn check_and_populate_dependencies(
         if path.is_dir() {
             if path.join(RUST_SRC_PATH).exists() && !checked_rust && !skip_deps_check {
                 let deps = check_rust_deps()?;
-                get_deps(deps, &mut recv_kill, verbose).await?;
+                get_deps(deps, &mut recv_kill, false, verbose).await?;
                 checked_rust = true;
             } else if path.join(PYTHON_SRC_PATH).exists() && !checked_py {
                 check_py_deps()?;
                 checked_py = true;
             } else if path.join(JAVASCRIPT_SRC_PATH).exists() && !checked_js && !skip_deps_check {
                 let deps = check_js_deps()?;
-                get_deps(deps, &mut recv_kill, verbose).await?;
+                get_deps(deps, &mut recv_kill, false, verbose).await?;
                 checked_js = true;
             } else if Some("api") == path.file_name().and_then(|s| s.to_str()) {
                 // read api files: to be used in build
@@ -1859,7 +1859,7 @@ pub async fn execute(
         if !skip_deps_check {
             let mut recv_kill = make_fake_kill_chan();
             let deps = check_js_deps()?;
-            get_deps(deps, &mut recv_kill, verbose).await?;
+            get_deps(deps, &mut recv_kill, false, verbose).await?;
         }
         let valid_node = get_newest_valid_node_version(None, None)?;
         for ui_dir in ui_dirs {
