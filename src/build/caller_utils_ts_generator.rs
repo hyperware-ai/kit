@@ -25,11 +25,19 @@ pub fn to_pascal_case(s: &str) -> String {
     // Strip % prefix if present
     let s = strip_wit_escape(s);
 
-    let parts = s.split('-');
+    let parts: Vec<&str> = s.split('-').collect();
     let mut result = String::new();
 
     for part in parts {
-        if !part.is_empty() {
+        if part.is_empty() {
+            continue;
+        }
+
+        // Single letter parts should be uppercased entirely (part of an acronym)
+        if part.len() == 1 {
+            result.push(part.chars().next().unwrap().to_uppercase().next().unwrap());
+        } else {
+            // Multi-letter parts: capitalize first letter, keep the rest as-is
             let mut chars = part.chars();
             if let Some(first_char) = chars.next() {
                 result.push(first_char.to_uppercase().next().unwrap());
@@ -524,8 +532,8 @@ fn generate_typescript_enum(enum_def: &WitEnum) -> String {
 
     for case in &enum_def.cases {
         let case_pascal = to_pascal_case(case);
-        // Use the original kebab-case value as the string value
-        enum_str.push_str(&format!("  {} = \"{}\",\n", case_pascal, case));
+        // Use the PascalCase value as the string value to match the original Rust enum
+        enum_str.push_str(&format!("  {} = \"{}\",\n", case_pascal, case_pascal));
     }
 
     enum_str.push_str("}");

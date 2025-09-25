@@ -65,19 +65,13 @@ fn to_kebab_case(s: &str) -> String {
         return s.replace('_', "-");
     }
 
-    let mut result = String::with_capacity(s.len() + 5); // Extra capacity for hyphens
+    let mut result = String::with_capacity(s.len() + 10); // Extra capacity for hyphens
     let chars: Vec<char> = s.chars().collect();
 
     for (i, &c) in chars.iter().enumerate() {
         if c.is_uppercase() {
-            // Add hyphen if:
-            // 1. Not the first character
-            // 2. Previous character is lowercase
-            // 3. Or next character is lowercase (to handle acronyms like HTML)
-            if i > 0
-                && (chars[i - 1].is_lowercase()
-                    || (i < chars.len() - 1 && chars[i + 1].is_lowercase()))
-            {
+            // Add hyphen before each uppercase letter except at the beginning
+            if i > 0 {
                 result.push('-');
             }
             result.push(c.to_lowercase().next().unwrap());
