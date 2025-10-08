@@ -1545,7 +1545,7 @@ fn is_cluded(path: &Path, include: &HashSet<PathBuf>, exclude: &HashSet<PathBuf>
 }
 
 /// package dir looks like:
-/// ```
+///
 /// metadata.json
 /// api/                                  <- optional
 ///   my_package:publisher.os-v0.wit
@@ -1565,7 +1565,6 @@ fn is_cluded(path: &Path, include: &HashSet<PathBuf>, exclude: &HashSet<PathBuf>
 ///   target/                             <- built
 ///     api/
 ///     wit/
-/// ```
 #[instrument(level = "trace", skip_all)]
 async fn compile_package(
     package_dir: &Path,
