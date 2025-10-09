@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use color_eyre::{
     eyre::{bail, eyre, WrapErr},
@@ -1053,11 +1054,23 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             project_path.display()
         )
     })?;
-    let ast = syn::parse_file(&lib_content).with_context(|| {
-        format!(
-            "Failed to parse lib.rs for project: {}",
-            project_path.display()
-        )
+    let ast = syn::parse_file(&lib_content).map_err(|parse_err| {
+        let mut report_msg = format!(
+            "Failed to parse lib.rs for project: {}: {}",
+            project_path.display(),
+            parse_err
+        );
+        if let Ok(output) = Command::new("cargo")
+            .arg("check")
+            .current_dir(project_path)
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            report_msg.push_str(&format!("\n\ncargo check stdout:\n{}", stdout));
+            report_msg.push_str(&format!("\n\ncargo check stderr:\n{}", stderr));
+        }
+        eyre!(report_msg)
     })?;
 
     // --- PASS 1: Find Hyperprocess Impl Block & Extract Handler Signatures ---
