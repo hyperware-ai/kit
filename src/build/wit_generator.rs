@@ -225,6 +225,8 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                 "u64" => Ok("u64".to_string()),
                 "f32" => Ok("f32".to_string()),
                 "f64" => Ok("f64".to_string()),
+                "usize" => Ok("u64".to_string()),
+                "isize" => Ok("s64".to_string()),
                 "String" => Ok("string".to_string()),
                 "bool" => Ok("bool".to_string()),
                 "Vec" => {
