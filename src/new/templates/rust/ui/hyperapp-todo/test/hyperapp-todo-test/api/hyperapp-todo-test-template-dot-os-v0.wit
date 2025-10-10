@@ -1,0 +1,5 @@
+world hyperapp-todo-test-template-dot-os-v0 {
+    import hyperapp-todo;
+    import tester;
+    include process-v1;
+}

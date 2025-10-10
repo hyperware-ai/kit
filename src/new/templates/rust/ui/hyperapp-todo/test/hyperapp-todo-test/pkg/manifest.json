@@ -1,0 +1,17 @@
+[
+    {
+        "process_name": "hyperapp-todo-test",
+        "process_wasm_path": "/hyperapp-todo-test.wasm",
+        "on_exit": "None",
+        "request_networking": true,
+        "request_capabilities": [
+            "http-client:distro:sys",
+            "hyperapp-todo:hyperapp-todo:template.os"
+        ],
+        "grant_capabilities": [
+            "http-client:distro:sys",
+            "hyperapp-todo:hyperapp-todo:template.os"
+        ],
+        "public": true
+    }
+]
