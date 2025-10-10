@@ -1,0 +1,4 @@
+world skeleton-app-dot-os-v0 {
+    import app;
+    include process-v1;
+}
