@@ -23,7 +23,7 @@ pub enum Template {
     Echo,
     Fibonacci,
     FileTransfer,
-    HyperappSkeleton,
+    Hyperapp,
 }
 
 impl Language {
@@ -45,7 +45,7 @@ impl Template {
             Template::Echo => "echo",
             Template::Fibonacci => "fibonacci",
             Template::FileTransfer => "file-transfer",
-            Template::HyperappSkeleton => "hyperapp-skeleton",
+            Template::Hyperapp => "hyperapp",
         }
         .to_string()
     }
@@ -70,8 +70,8 @@ impl From<&String> for Template {
             "echo" => Template::Echo,
             "fibonacci" => Template::Fibonacci,
             "file-transfer" => Template::FileTransfer,
-            "hyperapp-skeleton" => Template::HyperappSkeleton,
-            _ => panic!("kit: template must be 'blank', 'chat', 'echo', 'fibonacci', or 'hyperapp-skeleton'; not '{s}'"),
+            "hyperapp" => Template::Hyperapp,
+            _ => panic!("kit: template must be 'blank', 'chat', 'echo', 'fibonacci', or 'hyperapp'; not '{s}'"),
         }
     }
 }
