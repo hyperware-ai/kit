@@ -23,7 +23,7 @@ pub enum Template {
     Echo,
     Fibonacci,
     FileTransfer,
-    HyperappSkeleton
+    HyperappSkeleton,
 }
 
 impl Language {
