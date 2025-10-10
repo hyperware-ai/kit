@@ -1,0 +1,20 @@
+{
+  "name": "id",
+  "description": "Prove your Hyperware id",
+  "image": "",
+  "properties": {
+    "package_name": "id",
+    "current_version": "0.1.0",
+    "publisher": "sys",
+    "mirrors": [],
+    "code_hashes": {
+      "0.1.0": ""
+    },
+    "wit_version": 1,
+    "dependencies": [
+        "sign:sys"
+    ]
+  },
+  "external_url": "https://hyperware.ai",
+  "animation_url": ""
+}
