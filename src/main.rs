@@ -54,6 +54,31 @@ fn parse_u128_with_underscores(s: &str) -> Result<u128, &'static str> {
 }
 
 #[instrument(level = "trace", skip_all)]
+fn parse_rust_toolchain(s: &str) -> Result<String, &'static str> {
+    // Validate the format: must start with '+' followed by version or channel name
+    if !s.starts_with('+') {
+        return Err("Rust toolchain must start with '+' (e.g., '+stable', '+1.85.1', '+nightly')");
+    }
+
+    let toolchain = &s[1..];
+
+    // Check if it's a valid channel name or version format
+    if toolchain.is_empty() {
+        return Err("Rust toolchain cannot be empty after '+'");
+    }
+
+    // Basic validation: alphanumeric, dots, dashes, and hyphens are allowed
+    if !toolchain
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '.' || c == '-' || c == '_')
+    {
+        return Err("Invalid characters in Rust toolchain specification");
+    }
+
+    Ok(s.to_string())
+}
+
+#[instrument(level = "trace", skip_all)]
 async fn get_latest_commit_sha_from_branch(
     owner: &str,
     repo: &str,
@@ -247,6 +272,7 @@ async fn execute(
             let reproducible = matches.get_one::<bool>("REPRODUCIBLE").unwrap();
             let force = matches.get_one::<bool>("FORCE").unwrap();
             let verbose = matches.get_one::<bool>("VERBOSE").unwrap();
+            let toolchain = matches.get_one::<String>("TOOLCHAIN").unwrap();
 
             build::execute(
                 &package_dir,
@@ -267,6 +293,7 @@ async fn execute(
                 *force,
                 *verbose,
                 false,
+                toolchain,
             )
             .await
         }
@@ -312,6 +339,7 @@ async fn execute(
             let reproducible = matches.get_one::<bool>("REPRODUCIBLE").unwrap();
             let force = matches.get_one::<bool>("FORCE").unwrap();
             let verbose = matches.get_one::<bool>("VERBOSE").unwrap();
+            let toolchain = matches.get_one::<String>("TOOLCHAIN").unwrap();
 
             build_start_package::execute(
                 &package_dir,
@@ -331,6 +359,7 @@ async fn execute(
                 *reproducible,
                 *force,
                 *verbose,
+                toolchain,
             )
             .await
         }
@@ -473,6 +502,7 @@ async fn execute(
             let foundry_optional = matches.get_one::<bool>("FOUNDRY_OPTIONAL").unwrap();
             let javascript_optional = matches.get_one::<bool>("JAVASCRIPT_OPTIONAL").unwrap();
             let non_interactive = matches.get_one::<bool>("NON_INTERACTIVE").unwrap();
+            let toolchain = matches.get_one::<String>("TOOLCHAIN").unwrap();
 
             let mut recv_kill = build::make_fake_kill_chan();
             setup::execute(
@@ -483,6 +513,7 @@ async fn execute(
                 *javascript_optional,
                 *non_interactive,
                 *verbose,
+                toolchain,
             )
             .await
         }
@@ -829,6 +860,14 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .help("If set, output stdout and stderr")
                 .required(false)
             )
+            .arg(Arg::new("TOOLCHAIN")
+                .action(ArgAction::Set)
+                .long("toolchain")
+                .help("Rust toolchain to use (e.g., '+stable', '+1.85.1', '+nightly')")
+                .default_value(build::DEFAULT_RUST_TOOLCHAIN)
+                .value_parser(clap::builder::ValueParser::new(parse_rust_toolchain))
+                .required(false)
+            )
         )
         .subcommand(Command::new("build-start-package")
             .about("Build and start a Hyperware package")
@@ -940,6 +979,14 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .short('v')
                 .long("verbose")
                 .help("If set, output stdout and stderr")
+                .required(false)
+            )
+            .arg(Arg::new("TOOLCHAIN")
+                .action(ArgAction::Set)
+                .long("toolchain")
+                .help("Rust toolchain to use (e.g., '+stable', '+1.85.1', '+nightly')")
+                .default_value(build::DEFAULT_RUST_TOOLCHAIN)
+                .value_parser(clap::builder::ValueParser::new(parse_rust_toolchain))
                 .required(false)
             )
         )
@@ -1295,6 +1342,14 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .action(ArgAction::SetTrue)
                 .long("non-interactive")
                 .help("If set, do not prompt and instead always reply `Y` to prompts (i.e. automatically install dependencies without user input)")
+                .required(false)
+            )
+            .arg(Arg::new("TOOLCHAIN")
+                .action(ArgAction::Set)
+                .long("toolchain")
+                .help("Rust toolchain to use (e.g., '+stable', '+1.85.1', '+nightly')")
+                .default_value(build::DEFAULT_RUST_TOOLCHAIN)
+                .value_parser(clap::builder::ValueParser::new(parse_rust_toolchain))
                 .required(false)
             )
         )

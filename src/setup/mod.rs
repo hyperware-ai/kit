@@ -209,20 +209,20 @@ fn call_with_nvm(arg: &str, verbose: bool) -> Result<()> {
 }
 
 #[instrument(level = "trace", skip_all)]
-fn call_rustup(arg: &str, verbose: bool) -> Result<()> {
+fn call_rustup(arg: &str, verbose: bool, toolchain: &str) -> Result<()> {
     run_command(
-        Command::new("bash").args(&["-c", &format!("rustup +stable {}", arg)]),
+        Command::new("bash").args(&["-c", &format!("rustup {} {}", toolchain, arg)]),
         verbose,
     )?;
     Ok(())
 }
 
 #[instrument(level = "trace", skip_all)]
-fn call_cargo(arg: &str, verbose: bool) -> Result<()> {
+fn call_cargo(arg: &str, verbose: bool, toolchain: &str) -> Result<()> {
     let command = if arg.contains("--color=always") {
-        format!("cargo +stable {}", arg)
+        format!("cargo {} {}", toolchain, arg)
     } else {
-        format!("cargo +stable --color=always {}", arg)
+        format!("cargo {} --color=always {}", toolchain, arg)
     };
     run_command(Command::new("bash").args(&["-c", &command]), verbose)?;
     Ok(())
@@ -252,11 +252,11 @@ fn parse_version(version_str: &str) -> Option<(u32, u32)> {
 }
 
 #[instrument(level = "trace", skip_all)]
-fn check_rust_toolchains_targets() -> Result<Vec<Dependency>> {
+fn check_rust_toolchains_targets(toolchain: &str) -> Result<Vec<Dependency>> {
     let mut missing_deps = Vec::new();
 
     let output = Command::new("rustup")
-        .arg("+stable")
+        .arg(toolchain)
         .arg("show")
         .output()?
         .stdout;
@@ -367,7 +367,7 @@ fn install_foundry(verbose: bool) -> Result<()> {
 
 /// Check for Rust deps, returning a Vec of not found: can be automatically fetched
 #[instrument(level = "trace", skip_all)]
-pub fn check_rust_deps() -> Result<Vec<Dependency>> {
+pub fn check_rust_deps(toolchain: &str) -> Result<Vec<Dependency>> {
     if !is_command_installed("rustup")? {
         // don't have rust -> missing all
         return Ok(vec![
@@ -377,7 +377,7 @@ pub fn check_rust_deps() -> Result<Vec<Dependency>> {
         ]);
     }
 
-    let mut missing_deps = check_rust_toolchains_targets()?;
+    let mut missing_deps = check_rust_toolchains_targets(toolchain)?;
     if !is_command_installed("wasm-tools")? {
         missing_deps.push(Dependency::WasmTools);
     }
@@ -406,13 +406,14 @@ pub async fn get_deps(
     recv_kill: &mut BroadcastRecvBool,
     non_interactive: bool,
     verbose: bool,
+    toolchain: &str,
 ) -> Result<()> {
     if deps.is_empty() {
         return Ok(());
     }
 
     if non_interactive {
-        install_deps(deps, verbose)?;
+        install_deps(deps, verbose, toolchain)?;
     } else {
         // If setup required, request user permission
         print!(
@@ -454,7 +455,7 @@ pub async fn get_deps(
         };
         let response = response.trim().to_lowercase();
         match response.as_str() {
-            "y" | "yes" | "" => install_deps(deps, verbose)?,
+            "y" | "yes" | "" => install_deps(deps, verbose, toolchain)?,
             r => warn!("Got '{}'; not getting deps.", r),
         }
     }
@@ -462,7 +463,7 @@ pub async fn get_deps(
 }
 
 #[instrument(level = "trace", skip_all)]
-fn install_deps(deps: Vec<Dependency>, verbose: bool) -> Result<()> {
+fn install_deps(deps: Vec<Dependency>, verbose: bool, toolchain: &str) -> Result<()> {
     for dep in deps {
         match dep {
             Dependency::Nvm => install_nvm(verbose)?,
@@ -472,8 +473,10 @@ fn install_deps(deps: Vec<Dependency>, verbose: bool) -> Result<()> {
                 verbose,
             )?,
             Dependency::Rust => install_rust(verbose)?,
-            Dependency::RustWasm32Wasi => call_rustup("target add wasm32-wasip1", verbose)?,
-            Dependency::WasmTools => call_cargo("install wasm-tools", verbose)?,
+            Dependency::RustWasm32Wasi => {
+                call_rustup("target add wasm32-wasip1", verbose, toolchain)?
+            }
+            Dependency::WasmTools => call_cargo("install wasm-tools", verbose, toolchain)?,
             Dependency::Foundry => install_foundry(verbose)?,
             Dependency::Docker => {}
         }
@@ -490,6 +493,7 @@ pub async fn execute(
     javascript_optional: bool,
     non_interactive: bool,
     verbose: bool,
+    toolchain: &str,
 ) -> Result<()> {
     info!("Setting up...");
 
@@ -502,7 +506,7 @@ pub async fn execute(
         }
     }
 
-    let mut missing_deps = check_rust_deps()?;
+    let mut missing_deps = check_rust_deps(toolchain)?;
 
     let mut js_deps = check_js_deps()?;
     if !javascript_optional {
@@ -527,7 +531,7 @@ pub async fn execute(
         warn!("Foundry deps are not satisfied: {foundry_deps:?}");
     }
 
-    get_deps(missing_deps, recv_kill, non_interactive, verbose).await?;
+    get_deps(missing_deps, recv_kill, non_interactive, verbose, toolchain).await?;
 
     info!("Done setting up.");
     Ok(())

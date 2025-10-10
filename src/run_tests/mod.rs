@@ -13,7 +13,7 @@ use tracing::{debug, info, instrument};
 use hyperware_process_lib::kernel_types::PackageManifestEntry;
 
 use crate::boot_fake_node;
-use crate::build;
+use crate::build::{self, DEFAULT_RUST_TOOLCHAIN};
 use crate::chain;
 use crate::inject_message;
 use crate::start_package;
@@ -382,6 +382,7 @@ async fn build_packages(
             false,
             false,
             false,
+            DEFAULT_RUST_TOOLCHAIN,
         )
         .await?;
         debug!("Start {path:?}");
@@ -408,6 +409,7 @@ async fn build_packages(
             false,
             false,
             false,
+            DEFAULT_RUST_TOOLCHAIN,
         )
         .await?;
     }
@@ -431,6 +433,7 @@ async fn build_packages(
             false,
             false,
             false,
+            DEFAULT_RUST_TOOLCHAIN,
         )
         .await?;
     }

@@ -26,6 +26,7 @@ pub async fn execute(
     reproducible: bool,
     force: bool,
     verbose: bool,
+    toolchain: &str,
 ) -> Result<()> {
     build::execute(
         package_dir,
@@ -46,6 +47,7 @@ pub async fn execute(
         force,
         verbose,
         false,
+        toolchain,
     )
     .await?;
     start_package::execute(package_dir, url).await?;
