@@ -5,11 +5,8 @@ use std::process::Command;
 use std::time::SystemTime;
 
 use color_eyre::{
-    Section,
-    {
-        eyre::{eyre, WrapErr},
-        Result,
-    },
+    eyre::{eyre, WrapErr},
+    Help, Result,
 };
 use fs_err as fs;
 use serde::{Deserialize, Serialize};
@@ -60,6 +57,40 @@ struct CargoFile {
 struct CargoPackage {
     name: String,
 }
+
+#[derive(Debug)]
+struct CommandExecutionError {
+    program: String,
+    args: Vec<String>,
+    exit_code: Option<i32>,
+    stdout: String,
+    stderr: String,
+}
+impl std::fmt::Display for CommandExecutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "Command `{} {:?}` failed with exit code {:?}",
+            self.program, self.args, self.exit_code
+        )?;
+        if !self.stdout.is_empty() {
+            writeln!(f, "Stdout:")?;
+            write!(f, "{}", self.stdout)?;
+            if !self.stdout.ends_with('\n') {
+                writeln!(f)?;
+            }
+        }
+        if !self.stderr.is_empty() {
+            writeln!(f, "Stderr:")?;
+            write!(f, "{}", self.stderr)?;
+            if !self.stderr.ends_with('\n') {
+                writeln!(f)?;
+            }
+        }
+        Ok(())
+    }
+}
+impl std::error::Error for CommandExecutionError {}
 
 pub fn make_fake_kill_chan() -> BroadcastRecvBool {
     let (_send_to_kill, recv_kill) = tokio::sync::broadcast::channel(1);
@@ -260,16 +291,17 @@ pub fn run_command(cmd: &mut Command, verbose: bool) -> Result<Option<(String, S
             String::from_utf8_lossy(&output.stderr).to_string(),
         )))
     } else {
-        Err(eyre!(
-            "Command `{} {:?}` failed with exit code {:?}\nstdout: {}\nstderr: {}",
-            cmd.get_program().to_str().unwrap(),
-            cmd.get_args()
-                .map(|a| a.to_str().unwrap())
+        Err(CommandExecutionError {
+            program: cmd.get_program().to_string_lossy().into_owned(),
+            args: cmd
+                .get_args()
+                .map(|a| a.to_string_lossy().into_owned())
                 .collect::<Vec<_>>(),
-            output.status.code(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        ))
+            exit_code: output.status.code(),
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        }
+        .into())
     }
 }
 
