@@ -3,7 +3,6 @@ use std::env;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use crate::clean::execute as clean_execute;
 use clap::{builder::PossibleValuesParser, command, value_parser, Arg, ArgAction, Command};
 use color_eyre::{
     eyre::{eyre, Result},
@@ -207,9 +206,32 @@ async fn execute(
             .await
         }
 
-        Some(("clean", matches)) => {
+       Some(("clean", matches)) => {
             let package_dir = PathBuf::from(matches.get_one::<String>("DIR").unwrap());
-            clean_execute(&package_dir)
+            let release = matches.get_one::<bool>("RELEASE").unwrap();
+            let profile = matches.get_one::<String>("PROFILE");
+            let targets: Vec<String> = matches
+                .get_many::<String>("TARGET")
+                .unwrap_or_default()
+                .map(|s| s.to_string())
+                .collect();
+            let packages: Vec<String> = matches
+                .get_many::<String>("PACKAGE")
+                .unwrap_or_default()
+                .map(|s| s.to_string())
+                .collect();
+            let dry_run = matches.get_one::<bool>("DRY_RUN").unwrap();
+            let verbose = matches.get_one::<bool>("VERBOSE").unwrap();
+
+            clean::execute(
+                &package_dir,
+                *release,
+                profile.map(|s| s.as_str()),
+                targets,
+                packages,
+                *dry_run,
+                *verbose,
+            )
         }
 
         Some(("build", matches)) => {
@@ -710,22 +732,63 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .required(false)
             )
         )
-        .subcommand(Command::new("clean")
-            .about("Remove the target directory")
-            .arg(Arg::new("DIR")
-                .action(ArgAction::Set)
-                .help("The package directory to build")
-                .default_value(current_dir)
-            )
-            .arg(Arg::new("VERBOSITY")
-                .action(ArgAction::Set)
-                .long("verbosity")
-                .help("Use verbose output (-vv very verbose/build.rs output)")
-                .default_value("0")
-                .value_parser(value_parser!(u8))
-            )
+        .subcommand(
+            Command::new("clean")
+                .about("Remove the target directory")
+                .arg(
+                    Arg::new("DIR")
+                        .action(ArgAction::Set)
+                        .help("The package directory to clean")
+                        .default_value(current_dir)
+                        .required(false),
+                )
+                .arg(
+                    Arg::new("RELEASE")
+                        .action(ArgAction::SetTrue)
+                        .short('r')
+                        .long("release")
+                        .help("Whether or not to clean release artifacts")
+                        .required(false),
+                )
+                .arg(
+                    Arg::new("PROFILE")
+                        .action(ArgAction::Set)
+                        .long("profile")
+                        .help("Clean artifacts of the specified profile")
+                        .required(false),
+                )
+                .arg(
+                    Arg::new("TARGET")
+                        .action(ArgAction::Append)
+                        .long("target")
+                        .help("Target triple to clean output for (can specify multiple times)")
+                        .required(false),
+                )
+                .arg(
+                    Arg::new("PACKAGE")
+                        .action(ArgAction::Append)
+                        .short('p')
+                        .long("package")
+                        .help("Package to clean artifacts for (can specify multiple times)")
+                        .required(false),
+                )
+                .arg(
+                    Arg::new("DRY_RUN")
+                        .action(ArgAction::SetTrue)
+                        .short('n')
+                        .long("dry-run")
+                        .help("Display what would be deleted without deleting anything")
+                        .required(false),
+                )
+                .arg(
+                    Arg::new("VERBOSE")
+                        .action(ArgAction::SetTrue)
+                        .short('v')
+                        .long("verbose")
+                        .help("If set, output stdout and stderr")
+                        .required(false),
+                ),
         )
-
         .subcommand(Command::new("build")
             .about("Build a Hyperware package")
             .visible_alias("b")
