@@ -9,17 +9,16 @@ use color_eyre::{
     Section,
 };
 use fs_err as fs;
+use kit::{
+    boot_fake_node, boot_real_node, build, build_start_package, chain, clean, connect, dev_ui,
+    inject_message, new, publish, remove_package, reset_cache, run_tests, setup, start_package,
+    update, view_api, KIT_LOG_PATH_DEFAULT,
+};
 use serde::Deserialize;
 use tracing::{error, instrument, warn, Level};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
     filter, fmt, layer::SubscriberExt, prelude::*, util::SubscriberInitExt, EnvFilter,
-};
-
-use kit::{
-    boot_fake_node, boot_real_node, build, build_start_package, chain, connect, dev_ui,
-    inject_message, new, publish, remove_package, reset_cache, run_tests, setup, start_package,
-    update, view_api, KIT_LOG_PATH_DEFAULT,
 };
 
 const MAX_REMOTE_VALUES: usize = 3;
@@ -231,6 +230,35 @@ async fn execute(
             )
             .await
         }
+
+        Some(("clean", matches)) => {
+            let package_dir = PathBuf::from(matches.get_one::<String>("DIR").unwrap());
+            let release = matches.get_one::<bool>("RELEASE").unwrap();
+            let profile = matches.get_one::<String>("PROFILE");
+            let targets: Vec<String> = matches
+                .get_many::<String>("TARGET")
+                .unwrap_or_default()
+                .map(|s| s.to_string())
+                .collect();
+            let packages: Vec<String> = matches
+                .get_many::<String>("PACKAGE")
+                .unwrap_or_default()
+                .map(|s| s.to_string())
+                .collect();
+            let dry_run = matches.get_one::<bool>("DRY_RUN").unwrap();
+            let verbose = matches.get_one::<bool>("VERBOSE").unwrap();
+
+            clean::execute(
+                &package_dir,
+                *release,
+                profile.map(|s| s.as_str()),
+                targets,
+                packages,
+                *dry_run,
+                *verbose,
+            )
+        }
+
         Some(("build", matches)) => {
             let package_dir = PathBuf::from(matches.get_one::<String>("DIR").unwrap());
             let no_ui = matches.get_one::<bool>("NO_UI").unwrap();
@@ -748,6 +776,63 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .help("Additional arguments to pass to the node (i.e. to Hyperdrive)")
                 .required(false)
             )
+        )
+        .subcommand(
+            Command::new("clean")
+                .about("Remove the target directory")
+                .arg(
+                    Arg::new("DIR")
+                        .action(ArgAction::Set)
+                        .help("The package directory to clean")
+                        .default_value(current_dir)
+                        .required(false),
+                )
+                .arg(
+                    Arg::new("RELEASE")
+                        .action(ArgAction::SetTrue)
+                        .short('r')
+                        .long("release")
+                        .help("Whether or not to clean release artifacts")
+                        .required(false),
+                )
+                .arg(
+                    Arg::new("PROFILE")
+                        .action(ArgAction::Set)
+                        .long("profile")
+                        .help("Clean artifacts of the specified profile")
+                        .required(false),
+                )
+                .arg(
+                    Arg::new("TARGET")
+                        .action(ArgAction::Append)
+                        .long("target")
+                        .help("Target triple to clean output for (can specify multiple times)")
+                        .required(false),
+                )
+                .arg(
+                    Arg::new("PACKAGE")
+                        .action(ArgAction::Append)
+                        .short('p')
+                        .long("package")
+                        .help("Package to clean artifacts for (can specify multiple times)")
+                        .required(false),
+                )
+                .arg(
+                    Arg::new("DRY_RUN")
+                        .action(ArgAction::SetTrue)
+                        .short('n')
+                        .long("dry-run")
+                        .help("Display what would be deleted without deleting anything")
+                        .required(false),
+                )
+                .arg(
+                    Arg::new("VERBOSE")
+                        .action(ArgAction::SetTrue)
+                        .short('v')
+                        .long("verbose")
+                        .help("If set, output stdout and stderr")
+                        .required(false),
+                ),
         )
         .subcommand(Command::new("build")
             .about("Build a Hyperware package")
