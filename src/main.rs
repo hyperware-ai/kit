@@ -206,7 +206,7 @@ async fn execute(
             .await
         }
 
-       Some(("clean", matches)) => {
+        Some(("clean", matches)) => {
             let package_dir = PathBuf::from(matches.get_one::<String>("DIR").unwrap());
             let release = matches.get_one::<bool>("RELEASE").unwrap();
             let profile = matches.get_one::<String>("PROFILE");
