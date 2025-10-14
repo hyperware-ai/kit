@@ -58,7 +58,8 @@ struct CargoPackage {
     name: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("Command `{program}` {args:?} failed with exit code {exit_code:?}\nstdout: {stdout}\nstderr: {stderr}")]
 struct CommandExecutionError {
     program: String,
     args: Vec<String>,
@@ -66,31 +67,6 @@ struct CommandExecutionError {
     stdout: String,
     stderr: String,
 }
-impl std::fmt::Display for CommandExecutionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(
-            f,
-            "Command `{} {:?}` failed with exit code {:?}",
-            self.program, self.args, self.exit_code
-        )?;
-        if !self.stdout.is_empty() {
-            writeln!(f, "Stdout:")?;
-            write!(f, "{}", self.stdout)?;
-            if !self.stdout.ends_with('\n') {
-                writeln!(f)?;
-            }
-        }
-        if !self.stderr.is_empty() {
-            writeln!(f, "Stderr:")?;
-            write!(f, "{}", self.stderr)?;
-            if !self.stderr.ends_with('\n') {
-                writeln!(f)?;
-            }
-        }
-        Ok(())
-    }
-}
-impl std::error::Error for CommandExecutionError {}
 
 pub fn make_fake_kill_chan() -> BroadcastRecvBool {
     let (_send_to_kill, recv_kill) = tokio::sync::broadcast::channel(1);
