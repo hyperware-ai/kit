@@ -17,7 +17,7 @@ use tracing_subscriber::{
 };
 
 use kit::{
-    boot_fake_node, boot_real_node, check, build, build_start_package, chain, connect, dev_ui,
+    boot_fake_node, boot_real_node, build, build_start_package, chain, check, connect, dev_ui,
     inject_message, new, publish, remove_package, reset_cache, run_tests, setup, start_package,
     update, view_api, KIT_LOG_PATH_DEFAULT,
 };
