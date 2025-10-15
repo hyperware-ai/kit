@@ -1,4 +1,0 @@
-world types-skeleton-app-dot-os-v0 {
-    import app;
-    include lib;
-}
