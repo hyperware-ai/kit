@@ -5,4 +5,5 @@ src/new/includes.rs
 src/new/templates/**/Cargo.lock
 src/new/templates/**/*.wasm
 src/new/templates/**/*.zip
+src/new/templates/rust/ui/hyperapp/pkg/ui/
 **/.DS_Store
