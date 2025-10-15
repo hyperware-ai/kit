@@ -17,6 +17,8 @@ use hyperware_process_lib::{homepage::add_to_homepage, our, println};
 // Standard imports for serialization
 use serde::{Deserialize, Serialize};
 
+const ICON: &str = include_str!("./icon");
+
 // STEP 1: DEFINE YOUR APP STATE
 // This struct holds all persistent data for your app
 // It MUST derive Default, Serialize, and Deserialize
@@ -52,8 +54,8 @@ impl AppState {
     #[init]
     async fn initialize(&mut self) {
         // Add your app to the Hyperware homepage
-        // Parameters: name, icon (emoji), path, widget
-        add_to_homepage("Skeleton App", Some("🦴"), Some("/"), None);
+        // Parameters: name, icon, path, widget
+        add_to_homepage("Skeleton App", Some(ICON), Some("/"), None);
         
         // Initialize your app state
         self.counter = 0;
