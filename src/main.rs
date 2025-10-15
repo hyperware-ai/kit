@@ -1106,7 +1106,7 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .short('t')
                 .long("template")
                 .help("Template to create")
-                .value_parser(["blank", "chat", "echo", "fibonacci", "file-transfer", "hyperapp"])
+                .value_parser(["blank", "chat", "echo", "fibonacci", "file-transfer", "hyperapp-skeleton"])
                 .default_value("chat")
             )
             .arg(Arg::new("UI")
