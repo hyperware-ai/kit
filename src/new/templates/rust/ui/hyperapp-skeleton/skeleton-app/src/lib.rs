@@ -10,11 +10,7 @@
 // - HTTP/WebSocket bindings
 use hyperprocess_macro::hyperprocess;
 
-// HYPERWARE PROCESS LIB IMPORTS
-// These are provided by the hyperprocess_macro, DO NOT add hyperware_process_lib to Cargo.toml
 use hyperware_process_lib::{homepage::add_to_homepage, our, println};
-
-// Standard imports for serialization
 use serde::{Deserialize, Serialize};
 
 const ICON: &str = include_str!("./icon");
@@ -22,7 +18,6 @@ const ICON: &str = include_str!("./icon");
 // STEP 1: DEFINE YOUR APP STATE
 // This struct holds all persistent data for your app
 // It MUST derive Default, Serialize, and Deserialize
-// Add PartialEq if you use this type in WIT interfaces
 #[derive(Default, Serialize, Deserialize)]
 pub struct AppState {
     // Example fields - replace with your app's data
@@ -116,9 +111,6 @@ impl AppState {
 // ✅ Simple structs with public fields
 // ❌ HashMap - use Vec<(K,V)> instead
 // ❌ Fixed arrays [T; N] - use Vec<T>
-// ❌ Complex enums with data
-// 
-// Workaround: Return complex data as JSON strings
 
 // COMMON PATTERNS:
 
