@@ -730,6 +730,7 @@ fn is_up_to_date(
     features: &str,
     cludes: &str,
     package_dir: &Path,
+    hyperapp: bool,
 ) -> Result<bool> {
     let old_features = fs::read_to_string(&build_with_features_path).ok();
     let old_cludes = fs::read_to_string(&build_with_cludes_path).ok();
@@ -759,8 +760,12 @@ fn is_up_to_date(
     {
         let exclude_files = HashSet::from(["Cargo.lock", "api.zip"]);
         let exclude_extensions = HashSet::from(["wasm"]);
-        let exclude_dirs = HashSet::from(["target"]);
+        let mut exclude_dirs = HashSet::from(["target", "node_modules", "dist"]);
         let mut must_exist_dirs = HashSet::from(["target"]);
+        if hyperapp {
+            exclude_dirs.insert("api");
+            must_exist_dirs.insert("api");
+        }
 
         let (mut source_time, build_time) = match get_most_recent_modified_time(
             package_dir,
@@ -1818,6 +1823,7 @@ pub async fn execute(
             features,
             &cludes,
             &package_dir,
+            hyperapp,
         )?
     {
         return Ok(());
