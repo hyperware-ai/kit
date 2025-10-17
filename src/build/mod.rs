@@ -757,12 +757,17 @@ fn is_up_to_date(
         && package_dir.join("pkg").join("api.zip").exists()
         && file_with_extension_exists(&package_dir.join("pkg"), "wasm")
     {
+        let exclude_files = HashSet::from(["Cargo.lock", "api.zip"]);
+        let exclude_extensions = HashSet::from(["wasm"]);
+        let exclude_dirs = HashSet::from(["target"]);
+        let mut must_exist_dirs = HashSet::from(["target"]);
+
         let (mut source_time, build_time) = match get_most_recent_modified_time(
             package_dir,
-            &HashSet::from(["Cargo.lock", "api.zip"]),
-            &HashSet::from(["wasm"]),
-            &HashSet::from(["target"]),
-            &mut HashSet::from(["target"]),
+            &exclude_files,
+            &exclude_extensions,
+            &exclude_dirs,
+            &mut must_exist_dirs,
             false,
         ) {
             Ok(v) => v,
@@ -789,10 +794,10 @@ fn is_up_to_date(
             let dep_package_dir = get_cargo_package_path(&package)?;
             let (dep_source_time, _) = match get_most_recent_modified_time(
                 &dep_package_dir,
-                &HashSet::from(["Cargo.lock", "api.zip"]),
-                &HashSet::from(["wasm"]),
-                &HashSet::from(["target"]),
-                &mut HashSet::from(["target"]),
+                &exclude_files,
+                &exclude_extensions,
+                &exclude_dirs,
+                &mut must_exist_dirs,
                 false,
             ) {
                 Ok(v) => v,
