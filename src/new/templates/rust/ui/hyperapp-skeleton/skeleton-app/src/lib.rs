@@ -44,7 +44,7 @@ pub struct Status {
         },
     ],
     save_config = hyperware_process_lib::hyperapp::SaveOptions::EveryMessage,
-    wit_world = "skeleton-app-dot-os-v0"
+    wit_world = "skeleton-app-skeleton-dot-os-v0"
 )]
 impl AppState {
     // INITIALIZATION FUNCTION
