@@ -42,7 +42,7 @@ export const useSkeletonStore = create<SkeletonStore>((set, get) => ({
   fetchStatus: async () => {
     set({ isLoading: true, error: null });
     try {
-      const status = await App.get_status('');
+      const status = await App.get_status();
       set({
         counter: status.counter,
         isLoading: false,
@@ -78,7 +78,7 @@ export const useSkeletonStore = create<SkeletonStore>((set, get) => ({
   // Fetch all messages
   fetchMessages: async () => {
     try {
-      const messages = await App.get_messages('');
+      const messages = await App.get_messages();
       set({ messages });
     } catch (error) {
       console.error('Failed to fetch messages:', error);

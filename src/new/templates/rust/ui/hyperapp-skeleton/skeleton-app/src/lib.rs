@@ -69,10 +69,8 @@ impl AppState {
     }
     
     // HTTP ENDPOINT EXAMPLE
-    // CRITICAL: ALL HTTP endpoints MUST accept _request_body parameter
-    // even if they don't use it. This is a framework requirement.
     #[http]
-    async fn get_status(&self, _request_body: String) -> Result<Status, String> {
+    async fn get_status(&self) -> Result<Status, String> {
         Ok(Status {
             counter: self.counter,
             message_count: self.messages.len() as u32,
@@ -85,10 +83,10 @@ impl AppState {
     // - Single value: { "MethodName": value }
     // - Multiple values as tuple: { "MethodName": [val1, val2] }
     #[http]
-    async fn increment_counter(&mut self, request_body: u32) -> Result<u32, String> {
-        self.counter += request_body;
+    async fn increment_counter(&mut self, amount: u32) -> Result<u32, String> {
+        self.counter += amount;
         self.messages
-            .push(format!("Counter incremented by {}", request_body));
+            .push(format!("Counter incremented by {}", amount));
 
         Ok(self.counter)
     }
@@ -96,7 +94,7 @@ impl AppState {
     // HTTP ENDPOINT RETURNING COMPLEX DATA
     // For complex types, return as JSON string to avoid WIT limitations
     #[http]
-    async fn get_messages(&self, _request_body: String) -> Result<Vec<String>, String> {
+    async fn get_messages(&self) -> Result<Vec<String>, String> {
         Ok(self.messages.clone())
     }    
 }
@@ -151,7 +149,6 @@ impl AppState {
 // - Use println! for backend logs (appears in terminal)
 // - Check browser console for frontend errors
 // - Common issues:
-//   * Missing _request_body parameter
 //   * Wrong parameter format (object vs tuple)
 //   * ProcessId parsing errors
 //   * Missing /our.js in HTML
