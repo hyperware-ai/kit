@@ -33,13 +33,9 @@ const ZEROTH_TBA: &str = "0x809A598d9883f2Fb6B77382eBfC9473Fd6A857c9";
 const DEFAULT_MAX_ATTEMPTS: u16 = 16;
 const DEFAULT_CONFIG_PATH: &str = "./Contracts.toml";
 
-const PREDEPLOY_CONTRACTS: &[(&str, &str)] = &[
-  
-];
+const PREDEPLOY_CONTRACTS: &[(&str, &str)] = &[];
 
-const STORAGE_SLOTS: &[(&str, &str, &str)] = &[
-    
-];
+const STORAGE_SLOTS: &[(&str, &str, &str)] = &[];
 
 const TRANSACTIONS: &[(&str, &str)] = &[
     // initialize Hypermap: give ownership to OWNER_ADDRESS
@@ -133,12 +129,12 @@ fn load_config(config_path: &PathBuf) -> Result<Option<ChainConfig>> {
         return Ok(None);
     }
 
-    let content = fs::read_to_string(config_path)
-        .map_err(|e| eyre!("Failed to read config file: {}", e))?;
-    
-    let config: ChainConfig = toml::from_str(&content)
-        .map_err(|e| eyre!("Failed to parse config file: {}", e))?;
-    
+    let content =
+        fs::read_to_string(config_path).map_err(|e| eyre!("Failed to read config file: {}", e))?;
+
+    let config: ChainConfig =
+        toml::from_str(&content).map_err(|e| eyre!("Failed to parse config file: {}", e))?;
+
     info!("Loaded config from {:?}", config_path);
     Ok(Some(config))
 }
@@ -146,17 +142,25 @@ fn load_config(config_path: &PathBuf) -> Result<Option<ChainConfig>> {
 fn load_bytecode(bytecode_path: &str) -> Result<String> {
     let content = fs::read_to_string(bytecode_path)
         .map_err(|e| eyre!("Failed to read bytecode file {}: {}", bytecode_path, e))?;
-    
+
     // Try to parse as JSON first (Foundry artifact format)
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-        if let Some(bytecode) = json.get("bytecode").and_then(|b| b.get("object")).and_then(|o| o.as_str()) {
+        if let Some(bytecode) = json
+            .get("bytecode")
+            .and_then(|b| b.get("object"))
+            .and_then(|o| o.as_str())
+        {
             return Ok(bytecode.to_string());
         }
-        if let Some(bytecode) = json.get("deployedBytecode").and_then(|b| b.get("object")).and_then(|o| o.as_str()) {
+        if let Some(bytecode) = json
+            .get("deployedBytecode")
+            .and_then(|b| b.get("object"))
+            .and_then(|o| o.as_str())
+        {
             return Ok(bytecode.to_string());
         }
     }
-    
+
     // Otherwise treat as raw hex
     Ok(content.trim().to_string())
 }
@@ -332,7 +336,7 @@ async fn apply_config_contracts(port: u16, config: &ChainConfig) -> Result<()> {
         for (slot, value) in &contract.storage {
             let normalized_slot = normalize_slot(slot);
             let hex_value = value.to_hex_string();
-            
+
             let request_body = serde_json::json!({
                 "jsonrpc": "2.0",
                 "method": "anvil_setStorageAt",
@@ -346,7 +350,10 @@ async fn apply_config_contracts(port: u16, config: &ChainConfig) -> Result<()> {
                 .await?
                 .json()
                 .await?;
-            debug!("Set storage slot {} for {} to {}", slot, contract.address, hex_value);
+            debug!(
+                "Set storage slot {} for {} to {}",
+                slot, contract.address, hex_value
+            );
         }
     }
 
@@ -403,7 +410,7 @@ pub async fn start_chain_with_config(
 
     // Always try to load default config
     let default_config = load_config(&PathBuf::from(DEFAULT_CONFIG_PATH))?;
-    
+
     // Load custom config if provided
     let custom_config = if let Some(path) = custom_config_path {
         load_config(&path)?
@@ -416,11 +423,11 @@ pub async fn start_chain_with_config(
         if !check_dot_os_tba(port).await? {
             predeploy_contracts(port).await?;
             initialize_contracts(port).await?;
-            
+
             if let Some(config) = default_config {
                 apply_config_contracts(port, &config).await?;
             }
-            
+
             if let Some(config) = custom_config {
                 apply_config_contracts(port, &config).await?;
             }
@@ -569,7 +576,12 @@ async fn predeploy_contracts(port: u16) -> Result<()> {
 
 /// kit chain, alias to anvil
 #[instrument(level = "trace", skip_all)]
-pub async fn execute(port: u16, verbose: bool, tracing: bool, custom_config_path: Option<PathBuf>) -> Result<()> {
+pub async fn execute(
+    port: u16,
+    verbose: bool,
+    tracing: bool,
+    custom_config_path: Option<PathBuf>,
+) -> Result<()> {
     let (send_to_cleanup, mut recv_in_cleanup) = tokio::sync::mpsc::unbounded_channel();
     let (send_to_kill, _recv_kill) = tokio::sync::broadcast::channel(1);
     let recv_kill_in_cos = send_to_kill.subscribe();
@@ -577,7 +589,14 @@ pub async fn execute(port: u16, verbose: bool, tracing: bool, custom_config_path
     let handle_signals = tokio::spawn(cleanup_on_signal(send_to_cleanup.clone(), recv_kill_in_cos));
 
     let recv_kill_in_start_chain = send_to_kill.subscribe();
-    let child = start_chain_with_config(port, recv_kill_in_start_chain, verbose, tracing, custom_config_path).await?;
+    let child = start_chain_with_config(
+        port,
+        recv_kill_in_start_chain,
+        verbose,
+        tracing,
+        custom_config_path,
+    )
+    .await?;
     let Some(mut child) = child else {
         return Err(eyre!(
             "Port {} is already in use by another anvil process",
