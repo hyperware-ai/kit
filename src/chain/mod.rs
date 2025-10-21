@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 
 use color_eyre::{
@@ -5,6 +8,7 @@ use color_eyre::{
     Section,
 };
 use reqwest::Client;
+use serde::Deserialize;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, info, instrument};
 
@@ -20,48 +24,21 @@ use crate::KIT_CACHE;
 // first account on anvil
 const OWNER_ADDRESS: &str = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
 
-const ERC6551_REGISTRY: &str = "0x000000006551c19487814612e58FE06813775758";
-const MULTICALL3: &str = "0xcA11bde05977b3631167028862bE2a173976CA11";
 const CREATE2: &str = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
 
 const HYPERMAP_PROXY: &str = "0x000000000044C6B8Cb4d8f0F889a3E47664EAeda";
-const HYPERMAP: &str = "0x000000000013a0486EBDc2DB1D7B4d1f7fCA92eD";
-const HYPER_ACCOUNT: &str = "0x0000000000EDAd72076CBe7b9Cfa3751D5a85C97";
-//const HYPER_ACCOUNT_MINTER: &str = "0xE01dCbD3Ed5f709874A1eA7a25677de18C8661c9";
 
 const DOT_OS_TBA: &str = "0x9b3853358ede717fc7D4806cF75d7A4d4517A9C9";
 const ZEROTH_TBA: &str = "0x809A598d9883f2Fb6B77382eBfC9473Fd6A857c9";
-
-const HYPERMAP_PROXY_LONG: &str =
-    "0x000000000000000000000000000000000044C6B8Cb4d8f0F889a3E47664EAeda";
-const HYPERMAP_LONG: &str = "0x000000000000000000000000000000000013a0486EBDc2DB1D7B4d1f7fCA92eD";
-
 const DEFAULT_MAX_ATTEMPTS: u16 = 16;
+const DEFAULT_CONFIG_PATH: &str = "./Contracts.toml";
 
 const PREDEPLOY_CONTRACTS: &[(&str, &str)] = &[
-    (
-        ERC6551_REGISTRY,
-        include_str!("./bytecode/erc6551registry.txt"),
-    ),
-    (MULTICALL3, include_str!("./bytecode/multicall.txt")),
-    (HYPER_ACCOUNT, include_str!("./bytecode/hyperaccount.txt")),
-    (HYPERMAP_PROXY, include_str!("./bytecode/erc1967proxy.txt")),
-    (HYPERMAP, include_str!("./bytecode/hypermap.txt")),
+  
 ];
 
 const STORAGE_SLOTS: &[(&str, &str, &str)] = &[
-    // Implementation slot
-    (
-        HYPERMAP_PROXY,
-        "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
-        HYPERMAP_LONG,
-    ),
-    // Hypermap immutable (set to proxy's own address)
-    (
-        HYPERMAP_PROXY,
-        "0x0000000000000000000000000000000000000000000000000000000000000000",
-        HYPERMAP_PROXY_LONG,
-    ),
+    
 ];
 
 const TRANSACTIONS: &[(&str, &str)] = &[
@@ -95,6 +72,94 @@ const TRANSACTIONS: &[(&str, &str)] = &[
     // cast calldata "execute(address,uint256,bytes,uint8)" 0x000000000044C6B8Cb4d8f0F889a3E47664EAeda 0 $(cast calldata "mint(address,bytes,bytes,address)" 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 $(cast --from-ascii "os") $(cast calldata "initialize()") 0xE01dCbD3Ed5f709874A1eA7a25677de18C8661c9) 0
     (ZEROTH_TBA, include_str!("./bytecode/mint-os.txt")),
 ];
+
+#[derive(Debug, Deserialize)]
+struct ChainConfig {
+    contracts: Vec<ContractConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ContractConfig {
+    address: String,
+    bytecode: Option<String>,
+    bytecode_path: Option<String>,
+    #[serde(default)]
+    storage: HashMap<String, StorageValue>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum StorageValue {
+    String(String),
+    Number(u64),
+}
+
+impl StorageValue {
+    fn to_hex_string(&self) -> String {
+        match self {
+            StorageValue::String(s) => {
+                if s.starts_with("0x") {
+                    // Pad to 32 bytes (64 hex chars + 0x)
+                    let stripped = s.trim_start_matches("0x");
+                    format!("0x{:0>64}", stripped)
+                } else {
+                    format!("0x{:0>64}", s)
+                }
+            }
+            StorageValue::Number(n) => format!("0x{:0>64x}", n),
+        }
+    }
+}
+
+fn normalize_slot(slot: &str) -> String {
+    if slot.starts_with("0x") {
+        // Already has 0x prefix, just pad to 32 bytes
+        let stripped = slot.trim_start_matches("0x");
+        format!("0x{:0>64}", stripped)
+    } else {
+        // No 0x prefix, parse as decimal and convert to hex
+        if let Ok(num) = slot.parse::<u64>() {
+            format!("0x{:0>64x}", num)
+        } else {
+            // Assume it's hex without prefix
+            format!("0x{:0>64}", slot)
+        }
+    }
+}
+
+fn load_config(config_path: &PathBuf) -> Result<Option<ChainConfig>> {
+    if !config_path.exists() {
+        debug!("Config file not found at {:?}, skipping", config_path);
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(config_path)
+        .map_err(|e| eyre!("Failed to read config file: {}", e))?;
+    
+    let config: ChainConfig = toml::from_str(&content)
+        .map_err(|e| eyre!("Failed to parse config file: {}", e))?;
+    
+    info!("Loaded config from {:?}", config_path);
+    Ok(Some(config))
+}
+
+fn load_bytecode(bytecode_path: &str) -> Result<String> {
+    let content = fs::read_to_string(bytecode_path)
+        .map_err(|e| eyre!("Failed to read bytecode file {}: {}", bytecode_path, e))?;
+    
+    // Try to parse as JSON first (Foundry artifact format)
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+        if let Some(bytecode) = json.get("bytecode").and_then(|b| b.get("object")).and_then(|o| o.as_str()) {
+            return Ok(bytecode.to_string());
+        }
+        if let Some(bytecode) = json.get("deployedBytecode").and_then(|b| b.get("object")).and_then(|o| o.as_str()) {
+            return Ok(bytecode.to_string());
+        }
+    }
+    
+    // Otherwise treat as raw hex
+    Ok(content.trim().to_string())
+}
 
 #[instrument(level = "trace", skip_all)]
 async fn get_nonce(port: u16, client: &Client, address: &str) -> Result<u64> {
@@ -231,6 +296,62 @@ async fn initialize_contracts(port: u16) -> Result<()> {
 
     Ok(())
 }
+#[instrument(level = "trace", skip_all)]
+async fn apply_config_contracts(port: u16, config: &ChainConfig) -> Result<()> {
+    let client = Client::new();
+    let url = format!("http://localhost:{}", port);
+
+    for contract in &config.contracts {
+        // Deploy bytecode if specified (either inline or from file)
+        let bytecode = if let Some(inline_bytecode) = &contract.bytecode {
+            Some(inline_bytecode.clone())
+        } else if let Some(bytecode_path) = &contract.bytecode_path {
+            Some(load_bytecode(bytecode_path)?)
+        } else {
+            None
+        };
+
+        if let Some(bytecode) = bytecode {
+            let request_body = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "anvil_setCode",
+                "params": [&contract.address, bytecode.trim()],
+                "id": 1
+            });
+            let _: serde_json::Value = client
+                .post(&url)
+                .json(&request_body)
+                .send()
+                .await?
+                .json()
+                .await?;
+            info!("Deployed contract from config at {}", contract.address);
+        }
+
+        // Set storage slots
+        for (slot, value) in &contract.storage {
+            let normalized_slot = normalize_slot(slot);
+            let hex_value = value.to_hex_string();
+            
+            let request_body = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "anvil_setStorageAt",
+                "params": [&contract.address, normalized_slot, hex_value],
+                "id": 1
+            });
+            let _: serde_json::Value = client
+                .post(&url)
+                .json(&request_body)
+                .send()
+                .await?
+                .json()
+                .await?;
+            debug!("Set storage slot {} for {} to {}", slot, contract.address, hex_value);
+        }
+    }
+
+    Ok(())
+}
 
 #[instrument(level = "trace", skip_all)]
 async fn check_dot_os_tba(port: u16) -> Result<bool> {
@@ -250,12 +371,25 @@ async fn check_dot_os_tba(port: u16) -> Result<bool> {
     Ok(code != "0x")
 }
 
+// Public function without custom config
 #[instrument(level = "trace", skip_all)]
 pub async fn start_chain(
+    port: u16,
+    recv_kill: BroadcastRecvBool,
+    verbose: bool,
+    tracing: bool,
+) -> Result<Option<Child>> {
+    start_chain_with_config(port, recv_kill, verbose, tracing, None).await
+}
+
+// Public function with custom config
+#[instrument(level = "trace", skip_all)]
+pub async fn start_chain_with_config(
     port: u16,
     mut recv_kill: BroadcastRecvBool,
     verbose: bool,
     tracing: bool,
+    custom_config_path: Option<PathBuf>,
 ) -> Result<Option<Child>> {
     let deps = check_foundry_deps()?;
     get_deps(
@@ -267,11 +401,29 @@ pub async fn start_chain(
     )
     .await?;
 
+    // Always try to load default config
+    let default_config = load_config(&PathBuf::from(DEFAULT_CONFIG_PATH))?;
+    
+    // Load custom config if provided
+    let custom_config = if let Some(path) = custom_config_path {
+        load_config(&path)?
+    } else {
+        None
+    };
+
     info!("Checking for Anvil on port {}...", port);
     if wait_for_anvil(port, 1, None).await.is_ok() {
         if !check_dot_os_tba(port).await? {
             predeploy_contracts(port).await?;
             initialize_contracts(port).await?;
+            
+            if let Some(config) = default_config {
+                apply_config_contracts(port, &config).await?;
+            }
+            
+            if let Some(config) = custom_config {
+                apply_config_contracts(port, &config).await?;
+            }
         }
         return Ok(None);
     }
@@ -305,6 +457,20 @@ pub async fn start_chain(
         if let Err(e) = initialize_contracts(port).await {
             let _ = child.kill();
             return Err(e.wrap_err("Failed to initialize contracts"));
+        }
+
+        if let Some(config) = default_config {
+            if let Err(e) = apply_config_contracts(port, &config).await {
+                let _ = child.kill();
+                return Err(e.wrap_err("Failed to apply default config contracts"));
+            }
+        }
+
+        if let Some(config) = custom_config {
+            if let Err(e) = apply_config_contracts(port, &config).await {
+                let _ = child.kill();
+                return Err(e.wrap_err("Failed to apply custom config contracts"));
+            }
         }
     }
 
@@ -403,7 +569,7 @@ async fn predeploy_contracts(port: u16) -> Result<()> {
 
 /// kit chain, alias to anvil
 #[instrument(level = "trace", skip_all)]
-pub async fn execute(port: u16, verbose: bool, tracing: bool) -> Result<()> {
+pub async fn execute(port: u16, verbose: bool, tracing: bool, custom_config_path: Option<PathBuf>) -> Result<()> {
     let (send_to_cleanup, mut recv_in_cleanup) = tokio::sync::mpsc::unbounded_channel();
     let (send_to_kill, _recv_kill) = tokio::sync::broadcast::channel(1);
     let recv_kill_in_cos = send_to_kill.subscribe();
@@ -411,7 +577,7 @@ pub async fn execute(port: u16, verbose: bool, tracing: bool) -> Result<()> {
     let handle_signals = tokio::spawn(cleanup_on_signal(send_to_cleanup.clone(), recv_kill_in_cos));
 
     let recv_kill_in_start_chain = send_to_kill.subscribe();
-    let child = start_chain(port, recv_kill_in_start_chain, verbose, tracing).await?;
+    let child = start_chain_with_config(port, recv_kill_in_start_chain, verbose, tracing, custom_config_path).await?;
     let Some(mut child) = child else {
         return Err(eyre!(
             "Port {} is already in use by another anvil process",

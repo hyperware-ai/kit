@@ -367,7 +367,10 @@ async fn execute(
             let port = matches.get_one::<u16>("PORT").unwrap();
             let verbose = matches.get_one::<bool>("VERBOSE").unwrap();
             let tracing = matches.get_one::<bool>("TRACING").unwrap();
-            chain::execute(*port, *verbose, *tracing).await
+            let config_path = matches
+                .get_one::<String>("CONFIG")
+                .map(|s| PathBuf::from(s));
+            chain::execute(*port, *verbose, *tracing, config_path).await
         }
         Some(("connect", matches)) => {
             let local_port = matches.get_one::<u16>("LOCAL_PORT").unwrap();
@@ -1013,6 +1016,13 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .short('t')
                 .long("tracing")
                 .help("If set, enable tracing/steps-tracing")
+                .required(false)
+            )
+            .arg(Arg::new("CONFIG")
+                .action(ArgAction::Set)
+                .short('c')
+                .long("config")
+                .help("Path to contracts config file (TOML format)")
                 .required(false)
             )
         )
