@@ -25,6 +25,13 @@ pub struct AppState {
     messages: Vec<String>,
 }
 
+#[derive(Default, Serialize, Deserialize, Debug)]
+pub struct Status {
+    counter: u32,
+    message_count: u32,
+    node: String,
+}
+
 // STEP 2: IMPLEMENT YOUR APP LOGIC
 // The #[hyperprocess] attribute goes HERE, before the impl block
 #[hyperprocess(
@@ -65,13 +72,12 @@ impl AppState {
     // CRITICAL: ALL HTTP endpoints MUST accept _request_body parameter
     // even if they don't use it. This is a framework requirement.
     #[http]
-    async fn get_status(&self, _request_body: String) -> String {
-        // Return current app status as JSON
-        serde_json::json!({
-            "counter": self.counter,
-            "message_count": self.messages.len(),
-            "node": our().node
-        }).to_string()
+    async fn get_status(&self, _request_body: String) -> Result<Status, String> {
+        Ok(Status {
+            counter: self.counter,
+            message_count: self.messages.len() as u32,
+            node: our().node.clone(),
+        })
     }
     
     // HTTP ENDPOINT WITH PARAMETERS
@@ -79,26 +85,20 @@ impl AppState {
     // - Single value: { "MethodName": value }
     // - Multiple values as tuple: { "MethodName": [val1, val2] }
     #[http]
-    async fn increment_counter(&mut self, request_body: String) -> Result<u32, String> {
-        // Parse the increment amount from request
-        let amount: u32 = match serde_json::from_str(&request_body) {
-            Ok(val) => val,
-            Err(_) => 1, // Default increment
-        };
-        
-        self.counter += amount;
-        self.messages.push(format!("Counter incremented by {}", amount));
-        
+    async fn increment_counter(&mut self, request_body: u32) -> Result<u32, String> {
+        self.counter += request_body;
+        self.messages
+            .push(format!("Counter incremented by {}", request_body));
+
         Ok(self.counter)
     }
     
     // HTTP ENDPOINT RETURNING COMPLEX DATA
     // For complex types, return as JSON string to avoid WIT limitations
     #[http]
-    async fn get_messages(&self, _request_body: String) -> String {
-        serde_json::to_string(&self.messages).unwrap_or_else(|_| "[]".to_string())
-    }
-    
+    async fn get_messages(&self, _request_body: String) -> Result<Vec<String>, String> {
+        Ok(self.messages.clone())
+    }    
 }
 
 

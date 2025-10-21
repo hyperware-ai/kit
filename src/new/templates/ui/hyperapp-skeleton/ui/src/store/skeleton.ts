@@ -2,7 +2,7 @@
 import { create } from 'zustand';
 import type { SkeletonState } from '../types/skeleton';
 import { getNodeId } from '../types/global';
-import * as api from '../utils/api';
+import { App } from '#caller-utils';
 
 interface SkeletonStore extends SkeletonState {
   // Actions
@@ -42,7 +42,7 @@ export const useSkeletonStore = create<SkeletonStore>((set, get) => ({
   fetchStatus: async () => {
     set({ isLoading: true, error: null });
     try {
-      const status = await api.getStatus();
+      const status = await App.get_status('');
       set({
         counter: status.counter,
         isLoading: false,
@@ -52,7 +52,7 @@ export const useSkeletonStore = create<SkeletonStore>((set, get) => ({
       await get().fetchMessages();
     } catch (error) {
       set({
-        error: api.getErrorMessage(error),
+        error: getErrorMessage(error),
         isLoading: false,
       });
     }
@@ -62,14 +62,14 @@ export const useSkeletonStore = create<SkeletonStore>((set, get) => ({
   incrementCounter: async (amount = 1) => {
     set({ isLoading: true, error: null });
     try {
-      const newCounter = await api.incrementCounter(amount);
+      const newCounter = await App.increment_counter(amount);
       set({
         counter: newCounter,
         isLoading: false,
       });
     } catch (error) {
       set({
-        error: api.getErrorMessage(error),
+        error: getErrorMessage(error),
         isLoading: false,
       });
     }
@@ -78,7 +78,7 @@ export const useSkeletonStore = create<SkeletonStore>((set, get) => ({
   // Fetch all messages
   fetchMessages: async () => {
     try {
-      const messages = await api.getMessages();
+      const messages = await App.get_messages('');
       set({ messages });
     } catch (error) {
       console.error('Failed to fetch messages:', error);
@@ -91,6 +91,10 @@ export const useSkeletonStore = create<SkeletonStore>((set, get) => ({
   setError: (error) => set({ error }),
   clearError: () => set({ error: null }),
 }));
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'An unknown error occurred';
+}
 
 // Selector hooks for common use cases
 export const useNodeId = () => useSkeletonStore((state) => state.nodeId);
