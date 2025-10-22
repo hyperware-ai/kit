@@ -21,11 +21,6 @@ rev = "e8b065179ce5d15893a23142416e59c87e0f31f6"
 features = ["derive"]
 version = "1.0"
 
-[features]
-caller-utils = ["hyperapp_skeleton_caller_utils"]
-default = ["caller-utils"]
-simulation-mode = []
-
 [lib]
 crate-type = ["cdylib"]
 
