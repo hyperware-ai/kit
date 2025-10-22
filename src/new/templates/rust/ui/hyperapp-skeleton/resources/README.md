@@ -62,7 +62,6 @@ Each idea includes implementation notes and key concepts to demonstrate.
 ## 📝 Quick Reminders
 
 ### Must-Have Requirements
-- `_request_body: String` parameter on ALL HTTP endpoints
 - `<script src="/our.js"></script>` in your HTML
 - Tuple format `[p1, p2]` for multi-parameter calls
 - `.expects_response(30)` on remote requests
