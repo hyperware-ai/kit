@@ -1,22 +1,8 @@
 // Zustand store for Skeleton App state management
 import { create } from 'zustand';
+import type { SkeletonState } from '../types/skeleton';
 import { getNodeId } from '../types/global';
 import { App } from '#caller-utils';
-
-// Store state interface
-export interface SkeletonState {
-  // Connection state
-  nodeId: string | null;
-  isConnected: boolean;
-  
-  // App data (mirrors backend state)
-  counter: number;
-  messages: string[];
-  
-  // UI state
-  isLoading: boolean;
-  error: string | null;
-}
 
 interface SkeletonStore extends SkeletonState {
   // Actions
