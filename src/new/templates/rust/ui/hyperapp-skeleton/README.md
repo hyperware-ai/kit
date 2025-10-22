@@ -142,7 +142,7 @@ pub struct AppState {
 For UI interaction:
 ```rust
 #[http]
-async fn my_method(&mut self, request_body: String) -> Result<String, String> {
+async fn my_method(&mut self) -> Result<String, String> {
     // Parse request, update state, return response
 }
 ```
@@ -165,9 +165,8 @@ There is also a `request_networking` field that must be true to send messages ov
 ### 4. Update Frontend
 
 1. Add types in `ui/src/types/skeleton.ts`
-2. Add API calls in `ui/src/utils/api.ts`
-3. Update store in `ui/src/store/skeleton.ts`
-4. Modify UI in `ui/src/App.tsx`
+2. Update store in `ui/src/store/skeleton.ts`
+3. Modify UI in `ui/src/App.tsx`
 
 ### 5. Rename as appropriate
 
