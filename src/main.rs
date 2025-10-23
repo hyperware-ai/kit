@@ -12,6 +12,7 @@ use fs_err as fs;
 use serde::Deserialize;
 use tracing::{error, instrument, warn, Level};
 use tracing_error::ErrorLayer;
+use tracing_subscriber::fmt::format::PrettyFields;
 use tracing_subscriber::{
     filter,
     fmt::{self as tracing_fmt},
@@ -20,7 +21,6 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
     EnvFilter,
 };
-use tracing_subscriber::fmt::format::PrettyFields;
 
 use kit::{
     boot_fake_node, boot_real_node, build, build_start_package, chain, connect, dev_ui,
