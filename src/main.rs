@@ -13,8 +13,14 @@ use serde::Deserialize;
 use tracing::{error, instrument, warn, Level};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
-    filter, fmt, layer::SubscriberExt, prelude::*, util::SubscriberInitExt, EnvFilter,
+    filter,
+    fmt::{self as tracing_fmt},
+    layer::SubscriberExt,
+    prelude::*,
+    util::SubscriberInitExt,
+    EnvFilter,
 };
+use tracing_subscriber::fmt::format::PrettyFields;
 
 use kit::{
     boot_fake_node, boot_real_node, build, build_start_package, chain, connect, dev_ui,
@@ -31,6 +37,9 @@ const STDOUT_LOG_LEVEL_DEFAULT: Level = Level::INFO;
 const STDERR_LOG_LEVEL_DEFAULT: &str = "error";
 const FILE_LOG_LEVEL_DEFAULT: &str = "debug";
 const RUST_LOG: &str = "RUST_LOG";
+
+mod logging;
+use logging::AnsiPreservingFormatter;
 
 #[derive(Debug, Deserialize)]
 struct Commit {
@@ -120,31 +129,40 @@ fn init_tracing(log_path: PathBuf) -> tracing_appender::non_blocking::WorkerGuar
         .add_directive("hyper=off".parse().unwrap())
         .add_directive("reqwest=off".parse().unwrap());
 
-    tracing_subscriber::registry()
-        .with(
-            fmt::layer()
+    let stdout_fields = PrettyFields::new().display_messages();
+    let stderr_fields = PrettyFields::new().display_messages();
+
+    let stdout_layer = tracing_fmt::layer()
+        .event_format(AnsiPreservingFormatter::new(
+            tracing_fmt::format()
                 .without_time()
-                .with_writer(std::io::stdout)
-                .with_ansi(true)
                 .with_level(false)
-                .with_target(false)
-                .fmt_fields(fmt::format::PrettyFields::new())
-                .with_filter(stdout_filter),
-        )
-        .with(
-            fmt::layer()
-                .with_file(true)
-                .with_line_number(true)
+                .with_target(false),
+        ))
+        .fmt_fields(stdout_fields)
+        .with_writer(std::io::stdout)
+        .with_ansi(true)
+        .with_filter(stdout_filter);
+
+    let stderr_layer = tracing_fmt::layer()
+        .event_format(AnsiPreservingFormatter::new(
+            tracing_fmt::format()
                 .without_time()
-                .with_writer(std::io::stderr)
-                .with_ansi(true)
                 .with_level(true)
                 .with_target(false)
-                .fmt_fields(fmt::format::PrettyFields::new())
-                .with_filter(stderr_filter),
-        )
+                .with_file(true)
+                .with_line_number(true),
+        ))
+        .fmt_fields(stderr_fields)
+        .with_writer(std::io::stderr)
+        .with_ansi(true)
+        .with_filter(stderr_filter);
+
+    tracing_subscriber::registry()
+        .with(stdout_layer)
+        .with(stderr_layer)
         .with(
-            fmt::layer()
+            tracing_fmt::layer()
                 .with_writer(non_blocking)
                 .with_ansi(false)
                 .json()
