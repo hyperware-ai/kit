@@ -738,6 +738,7 @@ fn is_up_to_date(
     features: &str,
     cludes: &str,
     package_dir: &Path,
+    hyperapp: bool,
 ) -> Result<bool> {
     let old_features = fs::read_to_string(&build_with_features_path).ok();
     let old_cludes = fs::read_to_string(&build_with_cludes_path).ok();
@@ -765,12 +766,21 @@ fn is_up_to_date(
         && package_dir.join("pkg").join("api.zip").exists()
         && file_with_extension_exists(&package_dir.join("pkg"), "wasm")
     {
+        let exclude_files = HashSet::from(["Cargo.lock", "api.zip"]);
+        let exclude_extensions = HashSet::from(["wasm"]);
+        let mut exclude_dirs = HashSet::from(["target", "node_modules", "dist"]);
+        let mut must_exist_dirs = HashSet::from(["target"]);
+        if hyperapp {
+            exclude_dirs.insert("api");
+            must_exist_dirs.insert("api");
+        }
+
         let (mut source_time, build_time) = match get_most_recent_modified_time(
             package_dir,
-            &HashSet::from(["Cargo.lock", "api.zip"]),
-            &HashSet::from(["wasm"]),
-            &HashSet::from(["target"]),
-            &mut HashSet::from(["target"]),
+            &exclude_files,
+            &exclude_extensions,
+            &exclude_dirs,
+            &mut must_exist_dirs,
             false,
         ) {
             Ok(v) => v,
@@ -797,10 +807,10 @@ fn is_up_to_date(
             let dep_package_dir = get_cargo_package_path(&package)?;
             let (dep_source_time, _) = match get_most_recent_modified_time(
                 &dep_package_dir,
-                &HashSet::from(["Cargo.lock", "api.zip"]),
-                &HashSet::from(["wasm"]),
-                &HashSet::from(["target"]),
-                &mut HashSet::from(["target"]),
+                &exclude_files,
+                &exclude_extensions,
+                &exclude_dirs,
+                &mut must_exist_dirs,
                 false,
             ) {
                 Ok(v) => v,
@@ -1821,6 +1831,7 @@ pub async fn execute(
             features,
             &cludes,
             &package_dir,
+            hyperapp,
         )?
     {
         return Ok(());
