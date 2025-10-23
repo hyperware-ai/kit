@@ -5,8 +5,11 @@ use std::process::Command;
 use std::time::SystemTime;
 
 use color_eyre::{
-    eyre::{eyre, WrapErr},
-    Help, Result,
+    Section,
+    {
+        eyre::{eyre, WrapErr},
+        Result,
+    },
 };
 use fs_err as fs;
 use serde::{Deserialize, Serialize};
@@ -56,16 +59,6 @@ struct CargoFile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CargoPackage {
     name: String,
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("Command `{program}` {args:?} failed with exit code {exit_code:?}\nstdout: {stdout}\nstderr: {stderr}")]
-struct CommandExecutionError {
-    program: String,
-    args: Vec<String>,
-    exit_code: Option<i32>,
-    stdout: String,
-    stderr: String,
 }
 
 pub fn make_fake_kill_chan() -> BroadcastRecvBool {
@@ -267,17 +260,16 @@ pub fn run_command(cmd: &mut Command, verbose: bool) -> Result<Option<(String, S
             String::from_utf8_lossy(&output.stderr).to_string(),
         )))
     } else {
-        Err(CommandExecutionError {
-            program: cmd.get_program().to_string_lossy().into_owned(),
-            args: cmd
-                .get_args()
-                .map(|a| a.to_string_lossy().into_owned())
+        Err(eyre!(
+            "Command `{} {:?}` failed with exit code {:?}\nstdout: {}\nstderr: {}",
+            cmd.get_program().to_str().unwrap(),
+            cmd.get_args()
+                .map(|a| a.to_str().unwrap())
                 .collect::<Vec<_>>(),
-            exit_code: output.status.code(),
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        }
-        .into())
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        ))
     }
 }
 
