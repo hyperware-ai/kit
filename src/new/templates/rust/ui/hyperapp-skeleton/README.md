@@ -59,7 +59,7 @@ kit build --hyperapp
 hyperapp-skeleton/
 ├── Cargo.toml          # Workspace configuration
 ├── metadata.json       # App metadata
-├── skeleton-app/       # Main Rust process
+├── hyperapp-skeleton/       # Main Rust process
 │   ├── Cargo.toml      # Process dependencies
 │   └── src/
 │       ├── lib.rs      # Main app logic (well-commented)
@@ -127,7 +127,7 @@ Your app's state is automatically persisted based on the `save_config` option:
 
 ### 1. Modify App State
 
-Edit `AppState` in `skeleton-app/src/lib.rs`:
+Edit `AppState` in `hyperapp-skeleton/src/lib.rs`:
 ```rust
 #[derive(Default, Serialize, Deserialize)]
 pub struct AppState {
@@ -163,8 +163,8 @@ There is also a `request_networking` field that must be true to send messages ov
 
 ### 4. Update Frontend
 
-1. Add types in `ui/src/types/skeleton.ts`
-2. Update store in `ui/src/store/skeleton.ts`
+1. Add types in `ui/src/types/hyperapp-skeleton.ts`
+2. Update store in `ui/src/store/hyperapp-skeleton.ts`
 3. Modify UI in `ui/src/App.tsx`
 
 ### 5. Rename as appropriate
@@ -209,7 +209,7 @@ In particular, note the example applications `resources/example-apps/sign/`, `re
 `file-explorer` demonstrates VFS interactions.
 
 Expand the prompt and/or `instructions.md` into a detailed implementation plan.
-The implementor will be starting from this existing template that exists at `skeleton-app/` and `ui/`.
+The implementor will be starting from this existing template that exists at `hyperapp-skeleton/` and `ui/`.
 
 Note in particular that bindings for the UI will be generated when the app is built with `kit build --hyperapp`.
 As such, first design and implement the backend; the interface will be generated from the backend; finally design and implement the frontend to consume the interface.
@@ -229,7 +229,7 @@ Look carefully at `IMPLEMENTATION_PLAN.md` and in the `resources/` directory, if
 In particular, note the example applications `resources/example-apps/sign/`, `resources/example-apps/id/`, and `resources/example-apps/file-explorer`.
 Use them if useful.
 
-Work from the existing template that exists at `skeleton-app/` and `ui/`.
+Work from the existing template that exists at `hyperapp-skeleton/` and `ui/`.
 
 Note in particular that bindings for the UI will be generated when the app is built with `kit build --hyperapp`.
 As such, first design and implement the backend; the interface will be generated from the backend; finally design and implement the frontend to consume the interface.

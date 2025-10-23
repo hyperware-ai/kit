@@ -1,8 +1,8 @@
-// Type definitions for the Skeleton App
+// Type definitions for the Hyperapp Skeleton App
 // These should match the types defined in your Rust backend
 
 // Store state interface
-export interface SkeletonState {
+export interface HyperappSkeletonState {
   // Connection state
   nodeId: string | null;
   isConnected: boolean;

@@ -35,7 +35,7 @@ pub struct Status {
 // STEP 2: IMPLEMENT YOUR APP LOGIC
 // The #[hyperprocess] attribute goes HERE, before the impl block
 #[hyperprocess(
-    name = "Skeleton App",
+    name = "HyperappSkeleton App",
     ui = Some(hyperware_process_lib::http::server::HttpBindingConfig::default()),
     endpoints = vec![
         hyperware_process_lib::hyperapp::Binding::Http {
@@ -44,7 +44,7 @@ pub struct Status {
         },
     ],
     save_config = hyperware_process_lib::hyperapp::SaveOptions::EveryMessage,
-    wit_world = "skeleton-app-skeleton-dot-os-v0"
+    wit_world = "hyperapp-skeleton-template-dot-os-v0"
 )]
 impl AppState {
     // INITIALIZATION FUNCTION
@@ -57,7 +57,7 @@ impl AppState {
     async fn initialize(&mut self) {
         // Add your app to the Hyperware homepage
         // Parameters: name, icon, path, widget
-        add_to_homepage("Skeleton App", Some(ICON), Some("/"), None);
+        add_to_homepage("HyperappSkeleton App", Some(ICON), Some("/"), None);
         
         // Initialize your app state
         self.counter = 0;
@@ -65,7 +65,7 @@ impl AppState {
         
         // Get our node identity (useful for P2P apps)
         let our_node = our().node.clone();
-        println!("Skeleton app initialized on node: {}", our_node);
+        println!("HyperappSkeleton app initialized on node: {}", our_node);
     }
     
     // HTTP ENDPOINT EXAMPLE

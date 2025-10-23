@@ -58,9 +58,9 @@ let process_id = "myapp:myapp:publisher.os"
 // For your app to talk to itself on other nodes
 // IMPORTANT: All nodes must use the same publisher!
 let my_process_id = format!("{}:{}:{}", 
-    "skeleton-app",      // process name (from metadata.json)
-    "skeleton-app",      // package name (from metadata.json)
-    "skeleton.os"        // publisher (must be consistent across nodes)
+    "hyperapp-skeleton",      // process name (from metadata.json)
+    "hyperapp-skeleton",      // package name (from metadata.json)
+    "template.os"        // publisher (must be consistent across nodes)
 ).parse::<ProcessId>()?;
 ```
 
@@ -120,7 +120,7 @@ async fn get_remote_data(&self, request_body: String) -> Result<String, String> 
     let target_node: String = serde_json::from_str(&request_body)?;
     
     // Build address
-    let process_id = "skeleton-app:skeleton-app:skeleton.os".parse::<ProcessId>()?;
+    let process_id = "hyperapp-skeleton:hyperapp-skeleton:template.os".parse::<ProcessId>()?;
     let target = Address::new(target_node, process_id);
     
     // Create request
@@ -204,7 +204,7 @@ async fn broadcast_event(&mut self, request_body: String) -> Result<String, Stri
     
     // Send to all known nodes
     for node in &self.connected_nodes {
-        let process_id = "skeleton-app:skeleton-app:skeleton.os".parse::<ProcessId>()?;
+        let process_id = "hyperapp-skeleton:hyperapp-skeleton:template.os".parse::<ProcessId>()?;
         let target = Address::new(node.clone(), process_id);
         
         // Fire and forget - still set timeout for reliability
@@ -262,7 +262,7 @@ pub struct SyncResponse {
 // Periodic sync with peers
 impl AppState {
     async fn sync_with_peer(&mut self, peer_node: String) -> Result<(), String> {
-        let process_id = "skeleton-app:skeleton-app:skeleton.os".parse::<ProcessId>()?;
+        let process_id = "hyperapp-skeleton:hyperapp-skeleton:template.os".parse::<ProcessId>()?;
         let target = Address::new(peer_node.clone(), process_id);
         
         // Send our state info
@@ -359,7 +359,7 @@ impl AppState {
             "ApplyOperation": serde_json::to_string(&op).unwrap()
         });
         
-        let process_id = "skeleton-app:skeleton-app:skeleton.os".parse::<ProcessId>()?;
+        let process_id = "hyperapp-skeleton:hyperapp-skeleton:template.os".parse::<ProcessId>()?;
         
         for peer in &self.peers {
             let target = Address::new(peer.clone(), process_id);
@@ -509,7 +509,7 @@ impl AppState {
             "RegisterNode": serde_json::to_string(&my_info).unwrap()
         });
         
-        let process_id = "skeleton-app:skeleton-app:skeleton.os".parse::<ProcessId>()?;
+        let process_id = "hyperapp-skeleton:hyperapp-skeleton:template.os".parse::<ProcessId>()?;
         
         // Announce to bootstrap nodes
         for bootstrap in &self.bootstrap_nodes {
@@ -584,7 +584,7 @@ async fn start_transaction(&mut self, request_body: String) -> Result<String, St
         "PrepareTransaction": serde_json::to_string(&tx).unwrap()
     });
     
-    let process_id = "skeleton-app:skeleton-app:skeleton.os".parse::<ProcessId>()?;
+    let process_id = "hyperapp-skeleton:hyperapp-skeleton:template.os".parse::<ProcessId>()?;
     let mut votes = HashMap::new();
     
     for participant in &tx.participants {
