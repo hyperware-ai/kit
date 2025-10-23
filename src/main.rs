@@ -129,38 +129,35 @@ fn init_tracing(log_path: PathBuf) -> tracing_appender::non_blocking::WorkerGuar
         .add_directive("hyper=off".parse().unwrap())
         .add_directive("reqwest=off".parse().unwrap());
 
-    let stdout_fields = PrettyFields::new().display_messages();
-    let stderr_fields = PrettyFields::new().display_messages();
-
-    let stdout_layer = tracing_fmt::layer()
-        .event_format(AnsiPreservingFormatter::new(
-            tracing_fmt::format()
-                .without_time()
-                .with_level(false)
-                .with_target(false),
-        ))
-        .fmt_fields(stdout_fields)
-        .with_writer(std::io::stdout)
-        .with_ansi(true)
-        .with_filter(stdout_filter);
-
-    let stderr_layer = tracing_fmt::layer()
-        .event_format(AnsiPreservingFormatter::new(
-            tracing_fmt::format()
-                .without_time()
-                .with_level(true)
-                .with_target(false)
-                .with_file(true)
-                .with_line_number(true),
-        ))
-        .fmt_fields(stderr_fields)
-        .with_writer(std::io::stderr)
-        .with_ansi(true)
-        .with_filter(stderr_filter);
-
     tracing_subscriber::registry()
-        .with(stdout_layer)
-        .with(stderr_layer)
+        .with(
+            tracing_fmt::layer()
+                .event_format(AnsiPreservingFormatter::new(
+                    tracing_fmt::format()
+                        .without_time()
+                        .with_level(false)
+                        .with_target(false),
+                ))
+                .fmt_fields(PrettyFields::new().display_messages())
+                .with_writer(std::io::stdout)
+                .with_ansi(true)
+                .with_filter(stdout_filter),
+        )
+        .with(
+            tracing_fmt::layer()
+                .event_format(AnsiPreservingFormatter::new(
+                    tracing_fmt::format()
+                        .without_time()
+                        .with_level(true)
+                        .with_target(false)
+                        .with_file(true)
+                        .with_line_number(true),
+                ))
+                .fmt_fields(PrettyFields::new().display_messages())
+                .with_writer(std::io::stderr)
+                .with_ansi(true)
+                .with_filter(stderr_filter),
+        )
         .with(
             tracing_fmt::layer()
                 .with_writer(non_blocking)
