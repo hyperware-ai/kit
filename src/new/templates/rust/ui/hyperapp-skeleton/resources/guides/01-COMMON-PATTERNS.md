@@ -256,7 +256,7 @@ async fn sync_with_node(&mut self, request_body: String) -> Result<String, Strin
     let target_node: String = serde_json::from_str(&request_body)?;
     
     // Construct address
-    let process_id = format!("skeleton-app:skeleton-app:{}", "skeleton.os")
+    let process_id = format!("hyperapp-skeleton:hyperapp-skeleton:{}", "template.os")
         .parse::<ProcessId>()
         .map_err(|e| format!("Invalid process ID: {}", e))?;
     
@@ -302,7 +302,7 @@ async fn broadcast_update(&mut self, request_body: String) -> Result<String, Str
     let mut errors = Vec::new();
     
     for node in &self.connected_nodes {
-        let process_id = format!("skeleton-app:skeleton-app:{}", "skeleton.os")
+        let process_id = format!("hyperapp-skeleton:hyperapp-skeleton:{}", "template.os")
             .parse::<ProcessId>()
             .unwrap();
         
@@ -338,7 +338,7 @@ async fn reliable_remote_call(
     data: String,
     max_retries: u32,
 ) -> Result<String, String> {
-    let process_id = format!("skeleton-app:skeleton-app:{}", "skeleton.os")
+    let process_id = format!("hyperapp-skeleton:hyperapp-skeleton:{}", "template.os")
         .parse::<ProcessId>()
         .map_err(|e| format!("Invalid process ID: {}", e))?;
     
@@ -385,13 +385,13 @@ async fn reliable_remote_call(
 #[http]
 async fn upload_file(&mut self, file_name: String, mime_type: String, file_data: Vec<u8>) -> Result<String, String> {
     let file_id = uuid::Uuid::new_v4().to_string();
-    let file_path = format!("/skeleton-app:skeleton.os/files/{}", file_id);
+    let file_path = format!("/hyperapp-skeleton:template.os/files/{}", file_id);
     
     // Create directory if needed
     let vfs_address = Address::new(our().node.clone(), "vfs:distro:sys".parse::<ProcessId>().unwrap());
     
     let create_dir = json!({
-        "path": "/skeleton-app:skeleton.os/files",
+        "path": "/hyperapp-skeleton:template.os/files",
         "action": "CreateDirAll"
     });
     
@@ -431,7 +431,7 @@ async fn upload_file(&mut self, file_name: String, mime_type: String, file_data:
 #[http]
 async fn download_file(&self, request_body: String) -> Result<Vec<u8>, String> {
     let file_id: String = serde_json::from_str(&request_body)?;
-    let file_path = format!("/skeleton-app:skeleton.os/files/{}", file_id);
+    let file_path = format!("/hyperapp-skeleton:template.os/files/{}", file_id);
     
     let vfs_address = Address::new(our().node.clone(), "vfs:distro:sys".parse::<ProcessId>().unwrap());
     

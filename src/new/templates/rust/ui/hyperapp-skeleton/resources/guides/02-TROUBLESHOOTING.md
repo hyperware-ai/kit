@@ -288,8 +288,8 @@ let pid = "myapp-myapp-publisher".parse::<ProcessId>();  // Wrong separator
 let pid = "myapp:myapp:publisher.os".parse::<ProcessId>()?;
 
 // For your app matching remote nodes
-let publisher = "skeleton.os";  // Or whatever the remote uses
-let pid = format!("skeleton-app:skeleton-app:{}", publisher)
+let publisher = "template.os";  // Or whatever the remote uses
+let pid = format!("hyperapp-skeleton:hyperapp-skeleton:{}", publisher)
     .parse::<ProcessId>()?;
 ```
 
@@ -637,8 +637,8 @@ ls -la pkg/
 ```json
 // metadata.json must exist and be valid
 {
-  "package": "skeleton-app",
-  "publisher": "skeleton.os"
+  "package": "hyperapp-skeleton",
+  "publisher": "template.os"
 }
 ```
 
@@ -648,7 +648,7 @@ ls -la pkg/
 
 **Example:**
 ```
-Error: Process skeleton-app:skeleton-app:user.os does not have capability vfs:distro:sys
+Error: Process hyperapp-skeleton:hyperapp-skeleton:user.os does not have capability vfs:distro:sys
 ```
 
 **Root Cause:** Using system feature without requesting capability
@@ -715,7 +715,7 @@ ls -la pkg/ui/
 ### Test Incrementally
 ```bash
 # 1. Test backend compiles
-cd skeleton-app && cargo check
+cd hyperapp-skeleton && cargo check
 
 # 2. Test UI builds
 cd ui && npm run build

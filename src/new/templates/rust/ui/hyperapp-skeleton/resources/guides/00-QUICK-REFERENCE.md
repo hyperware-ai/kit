@@ -96,10 +96,10 @@ kit b --hyperapp
 
 ## Project Structure
 ```
-skeleton-app/
+hyperapp-skeleton/
 ├── Cargo.toml           # Workspace config
 ├── metadata.json        # App metadata
-├── skeleton-app/        # Rust backend
+├── hyperapp-skeleton/        # Rust backend
 │   ├── Cargo.toml      # DO NOT add hyperware_process_lib here!
 │   └── src/
 │       └── lib.rs      # Main app logic

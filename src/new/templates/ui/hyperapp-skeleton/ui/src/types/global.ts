@@ -6,7 +6,7 @@ declare global {
   interface Window {
     our?: {
       node: string;      // e.g., "alice.os"
-      process: string;   // e.g., "skeleton-app:skeleton-app:skeleton.os"
+      process: string;   // e.g., "hyperapp-skeleton:hyperapp-skeleton:template.os"
     };
   }
 }

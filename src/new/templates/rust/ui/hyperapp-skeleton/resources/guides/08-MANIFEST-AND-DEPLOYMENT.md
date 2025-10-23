@@ -20,8 +20,8 @@ This file tells Hyperware:
 ```json
 [
   {
-    "process_name": "skeleton-app",
-    "process_wasm_path": "/skeleton-app.wasm",
+    "process_name": "hyperapp-skeleton",
+    "process_wasm_path": "/hyperapp-skeleton.wasm",
     "on_exit": "Restart",
     "request_networking": true,
     "request_capabilities": [
@@ -38,8 +38,8 @@ This file tells Hyperware:
 
 | Field | Type | Description | Example |
 |-------|------|-------------|---------|
-| `process_name` | string | Must match your metadata.json package name | `"skeleton-app"` |
-| `process_wasm_path` | string | Path to compiled WASM file | `"/skeleton-app.wasm"` |
+| `process_name` | string | Must match your metadata.json package name | `"hyperapp-skeleton"` |
+| `process_wasm_path` | string | Path to compiled WASM file | `"/hyperapp-skeleton.wasm"` |
 | `on_exit` | string | What happens if process crashes | `"Restart"` or `"None"` |
 | `request_networking` | bool | Enables P2P messaging via Request API | `true` or `false` |
 | `request_capabilities` | array | System features needed | See capabilities section |
@@ -185,7 +185,7 @@ process-name:package-name:publisher-node
 ```
 
 For example:
-- `skeleton-app:skeleton-app:skeleton.os`
+- `hyperapp-skeleton:hyperapp-skeleton:template.os`
 - `samchat:samchat:samchat.os`
 
 This identity is used:
