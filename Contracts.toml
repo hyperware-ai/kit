@@ -55,7 +55,7 @@ constructor_args = [
      { type = "address", value = "#hypermap-proxy" }
 ]
 
-[[transaction]]
+[[transactions]]
 name = "initialize-hypermap"
 target = "#hypermap-proxy"
 function_signature = "initialize(address)"

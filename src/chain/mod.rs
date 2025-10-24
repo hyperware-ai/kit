@@ -20,7 +20,6 @@ use crate::KIT_CACHE;
 
 // First account on anvil
 const OWNER_ADDRESS: &str = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
-
 const DEFAULT_MAX_ATTEMPTS: u16 = 16;
 const DEFAULT_CONFIG_PATH: &str = "./Contracts.toml";
 
@@ -32,112 +31,69 @@ struct ContractAddresses {
     erc6551registry: String,
     multicall: String,
     create2: String,
-    dot_os_tba: String,
-    zeroth_tba: String,
+    hyper_9char_commit_minter: Option<String>,
+    hyper_permissioned_minter: Option<String>,
+    zeroth_tba: Option<String>,
+    dot_os_tba: Option<String>,
 }
 
 impl ContractAddresses {
-    async fn from_config(
-        port: u16,
-        config: &ChainConfig,
-        deployed: &HashMap<String, String>,
-    ) -> Result<Self> {
+    fn from_config(config: &ChainConfig, deployed: &HashMap<String, String>) -> Result<Self> {
         let resolve = |name: &str| -> Result<String> {
-            // First try deployed addresses
             if let Some(addr) = deployed.get(name) {
                 return Ok(addr.clone());
             }
-            // Then try config
             if let Some(addr) = config.get_address_by_name(name) {
                 return Ok(addr);
             }
             Err(eyre!("Missing '{}' in config and deployed contracts", name))
         };
 
-        let resolve_optional = |name: &str, default: &str| -> String {
-            deployed
-                .get(name)
-                .cloned()
-                .or_else(|| config.get_address_by_name(name))
-                .unwrap_or_else(|| default.to_string())
+        let resolve_optional = |name: &str| -> Option<String> {
+            if let Some(addr) = deployed.get(name) {
+                return Some(addr.clone());
+            }
+            config.get_address_by_name(name)
         };
-
-        let hypermap_proxy = resolve("hypermap-proxy")?;
-
-        // Call tbaOf(0) to get zeroth_tba address
-        // cast calldata "tbaOf(uint256)" 0
-        let tba_of_zero_calldata =
-            "0x27244d1e0000000000000000000000000000000000000000000000000000000000000000";
-        let zeroth_tba_result = call_contract(port, &hypermap_proxy, tba_of_zero_calldata).await?;
-
-        // Extract address from result (last 20 bytes / 40 hex chars)
-        let zeroth_tba = if zeroth_tba_result.len() >= 42 {
-            format!("0x{}", &zeroth_tba_result[zeroth_tba_result.len() - 40..])
-        } else {
-            resolve_optional("zeroth-tba", "0x809A598d9883f2Fb6B77382eBfC9473Fd6A857c9")
-        };
-
-        info!("Resolved zeroth_tba from hypermap: {}", zeroth_tba);
 
         Ok(Self {
-            hypermap_proxy,
+            hypermap_proxy: resolve("hypermap-proxy")?,
             hypermap_impl: resolve("hypermap-impl")?,
             hyperaccount: resolve("hyperaccount")?,
             erc6551registry: resolve("erc6551registry")?,
             multicall: resolve("multicall")?,
             create2: resolve("create2")?,
-            dot_os_tba: resolve_optional(
-                "dot-os-tba",
-                "0x9b3853358ede717fc7D4806cF75d7A4d4517A9C9",
-            ),
-            zeroth_tba,
+            hyper_9char_commit_minter: resolve_optional("hyperaccount-9char-commit-minter"),
+            hyper_permissioned_minter: resolve_optional("hyperaccount-permissioned-minter"),
+            zeroth_tba: None,
+            dot_os_tba: None,
         })
     }
 
     fn print_summary(&self) {
-        info!("╔════════════════════════════════════════════════════════════════╗");
-        info!("║              Contract Addresses Summary                        ║");
-        info!("╠════════════════════════════════════════════════════════════════╣");
-        info!("║ hypermap_proxy:   {}   ║", self.hypermap_proxy);
-        info!("║ hypermap_impl:    {}   ║", self.hypermap_impl);
-        info!("║ hyperaccount:     {}   ║", self.hyperaccount);
-        info!("║ erc6551registry:  {}   ║", self.erc6551registry);
-        info!("║ multicall:        {}   ║", self.multicall);
-        info!("║ create2:          {}   ║", self.create2);
-        info!("║ dot_os_tba:       {}   ║", self.dot_os_tba);
-        info!("║ zeroth_tba:       {}   ║", self.zeroth_tba);
-        info!("╚════════════════════════════════════════════════════════════════╝");
-    }
-
-    fn get_transactions(&self) -> Vec<(String, String)> {
-        vec![
-            // Initialize Hypermap: give ownership to OWNER_ADDRESS
-            (
-                self.hypermap_proxy.clone(),
-                "0xc4d66de8000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266"
-                    .to_string(),
-            ),
-            // CREATE2 deploy HyperAccountMinter
-            (
-                self.create2.clone(),
-                include_str!("./bytecode/deploy-hyperaccount-minter.txt").to_string(),
-            ),
-            // CREATE2 deploy HyperAccountPermissionedMinter
-            (
-                self.create2.clone(),
-                include_str!("./bytecode/deploy-hyperaccount-permissioned-minter.txt").to_string(),
-            ),
-            // CREATE2 deploy HyperAccount9CharCommitMinter
-            (
-                self.create2.clone(),
-                include_str!("./bytecode/deploy-hyperaccount-9char-commit-minter.txt").to_string(),
-            ),
-            // Mint .os
-            (
-                self.zeroth_tba.clone(),
-                include_str!("./bytecode/mint-os.txt").to_string(),
-            ),
-        ]
+        info!("╔════════════════════════════════════════════════════════════════════════╗");
+        info!("║              Contract Addresses Summary                                ║");
+        info!("╠════════════════════════════════════════════════════════════════════════╣");
+        info!("║ hypermap_proxy:            {}  ║", self.hypermap_proxy);
+        info!("║ hypermap_impl:             {}  ║", self.hypermap_impl);
+        info!("║ hyperaccount:              {}  ║", self.hyperaccount);
+        info!("║ erc6551registry:           {}  ║", self.erc6551registry);
+        info!("║ multicall:                 {}  ║", self.multicall);
+        info!("║ create2:                   {}  ║", self.create2);
+        if let Some(addr) = &self.hyper_9char_commit_minter {
+            info!("║ 9char_commit_minter:       {}  ║", addr);
+        }
+        if let Some(addr) = &self.hyper_permissioned_minter {
+            info!("║ permissioned_minter:       {}  ║", addr);
+        }
+        if let Some(addr) = &self.zeroth_tba {
+            info!("╠════════════════════════════════════════════════════════════════════════╣");
+            info!("║ zeroth_tba (minted):       {}  ║", addr);
+        }
+        if let Some(addr) = &self.dot_os_tba {
+            info!("║ dot_os_tba (minted):       {}  ║", addr);
+        }
+        info!("╚════════════════════════════════════════════════════════════════════════╝");
     }
 }
 
@@ -155,11 +111,9 @@ struct ContractConfig {
     #[serde(default)]
     name: Option<String>,
 
-    // For deployment (address will be computed)
     #[serde(default)]
     contract_json_path: Option<String>,
 
-    // For setting code at known address
     #[serde(default)]
     address: Option<String>,
 
@@ -211,7 +165,6 @@ impl StorageValue {
     fn resolve(&self, deployed: &HashMap<String, String>) -> Result<String> {
         match self {
             StorageValue::String(s) => {
-                // Check if it's a reference to another contract
                 if let Some(name) = s.strip_prefix('#') {
                     deployed
                         .get(name)
@@ -229,8 +182,7 @@ impl StorageValue {
         let resolved = self.resolve(deployed)?;
 
         if resolved.starts_with("0x") {
-            let stripped = resolved.trim_start_matches("0x");
-            Ok(format!("0x{:0>64}", stripped))
+            Ok(format!("0x{:0>64}", resolved.trim_start_matches("0x")))
         } else if let Ok(num) = resolved.parse::<u64>() {
             Ok(format!("0x{:0>64x}", num))
         } else {
@@ -263,14 +215,11 @@ impl ChainConfig {
 
 fn normalize_slot(slot: &str) -> String {
     if slot.starts_with("0x") {
-        let stripped = slot.trim_start_matches("0x");
-        format!("0x{:0>64}", stripped)
+        format!("0x{:0>64}", slot.trim_start_matches("0x"))
+    } else if let Ok(num) = slot.parse::<u64>() {
+        format!("0x{:0>64x}", num)
     } else {
-        if let Ok(num) = slot.parse::<u64>() {
-            format!("0x{:0>64x}", num)
-        } else {
-            format!("0x{:0>64}", slot)
-        }
+        format!("0x{:0>64}", slot)
     }
 }
 
@@ -290,111 +239,148 @@ fn load_config(config_path: &PathBuf) -> Result<Option<ChainConfig>> {
     Ok(Some(config))
 }
 
-/// Load deployed bytecode from JSON artifact (for anvil_setCode)
-fn load_deployed_bytecode(bytecode_path: &str) -> Result<String> {
-    let content = fs::read_to_string(bytecode_path)
-        .map_err(|e| eyre!("Failed to read bytecode file {}: {}", bytecode_path, e))?;
+/// Load bytecode from JSON artifact
+fn load_bytecode_from_json(path: &str, field: &str) -> Result<String> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| eyre!("Failed to read bytecode file {}: {}", path, e))?;
 
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-        // Try Foundry/Hardhat format: deployedBytecode.object
+        // Try nested format: field.object
         if let Some(bytecode) = json
-            .get("deployedBytecode")
+            .get(field)
             .and_then(|b| b.get("object"))
             .and_then(|o| o.as_str())
         {
             return Ok(bytecode.to_string());
         }
 
-        // Try Brownie format: deployedBytecode
-        if let Some(bytecode) = json.get("deployedBytecode").and_then(|b| b.as_str()) {
-            return Ok(bytecode.to_string());
-        }
-    }
-
-    Ok(content.trim().to_string())
-}
-
-/// Load creation bytecode from JSON artifact
-fn load_creation_bytecode(bytecode_path: &str) -> Result<String> {
-    let content = fs::read_to_string(bytecode_path)
-        .map_err(|e| eyre!("Failed to read bytecode file {}: {}", bytecode_path, e))?;
-
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-        // Try Foundry/Hardhat format: bytecode.object
-        if let Some(bytecode) = json
-            .get("bytecode")
-            .and_then(|b| b.get("object"))
-            .and_then(|o| o.as_str())
-        {
-            return Ok(bytecode.to_string());
-        }
-        // Try Brownie format: bytecode
-        else if let Some(bytecode) = json.get("bytecode").and_then(|b| b.as_str()) {
+        // Try flat format: field
+        if let Some(bytecode) = json.get(field).and_then(|b| b.as_str()) {
             return Ok(bytecode.to_string());
         }
     }
 
     let bytecode = content.trim().to_string();
     if bytecode.is_empty() {
-        return Err(eyre!(
-            "Could not find creation bytecode in {}",
-            bytecode_path
-        ));
+        return Err(eyre!("Could not find {} in {}", field, path));
     }
 
     Ok(bytecode)
 }
 
-/// Encode constructor arguments using alloy
-fn encode_constructor_args(
+fn load_deployed_bytecode(path: &str) -> Result<String> {
+    load_bytecode_from_json(path, "deployedBytecode")
+}
+
+fn load_creation_bytecode(path: &str) -> Result<String> {
+    load_bytecode_from_json(path, "bytecode")
+}
+
+fn parse_u8(s: &str) -> Result<u8> {
+    if s.starts_with("0x") {
+        u8::from_str_radix(&s[2..], 16).map_err(|e| eyre!("Invalid hex u8: {}", e))
+    } else {
+        s.parse::<u8>()
+            .map_err(|e| eyre!("Invalid decimal u8: {}", e))
+    }
+}
+
+fn parse_u32(s: &str) -> Result<u32> {
+    if s.starts_with("0x") {
+        u32::from_str_radix(&s[2..], 16).map_err(|e| eyre!("Invalid hex u32: {}", e))
+    } else {
+        s.parse::<u32>()
+            .map_err(|e| eyre!("Invalid decimal u32: {}", e))
+    }
+}
+
+fn parse_uint(s: &str) -> Result<alloy::primitives::U256> {
+    if s.starts_with("0x") {
+        alloy::primitives::U256::from_str_radix(&s[2..], 16)
+            .map_err(|e| eyre!("Invalid hex uint: {}", e))
+    } else {
+        alloy::primitives::U256::from_str_radix(s, 10)
+            .map_err(|e| eyre!("Invalid decimal uint: {}", e))
+    }
+}
+
+/// Convert ConstructorArgs to DynSolValues
+fn args_to_dyn_sol_values(
     args: &[ConstructorArg],
     deployed: &HashMap<String, String>,
-) -> Result<String> {
-    use alloy::primitives::{Address, Bytes, U256};
-    use alloy::sol_types::SolValue;
+) -> Result<Vec<alloy::dyn_abi::DynSolValue>> {
+    use alloy::dyn_abi::DynSolValue;
+    use alloy::primitives::{Address, U256};
 
-    let mut encoded = Vec::new();
+    let mut values = Vec::new();
 
     for arg in args {
         let resolved_value = arg.resolve_value(deployed)?;
 
-        let token_bytes = match arg.arg_type.as_str() {
+        let value = match arg.arg_type.as_str() {
             "address" => {
                 let addr: Address = resolved_value
                     .parse()
                     .map_err(|e| eyre!("Invalid address '{}': {}", resolved_value, e))?;
-                addr.abi_encode()
+                DynSolValue::Address(addr)
             }
             "uint256" | "uint" => {
-                let value = if resolved_value.starts_with("0x") {
-                    U256::from_str_radix(&resolved_value[2..], 16)?
-                } else {
-                    U256::from_str_radix(&resolved_value, 10)?
-                };
-                value.abi_encode()
+                let val = parse_uint(&resolved_value)?;
+                DynSolValue::Uint(val, 256)
             }
-            "string" => resolved_value.abi_encode(),
+            "uint32" => {
+                let val = parse_u32(&resolved_value)?;
+                DynSolValue::Uint(U256::from(val), 32)
+            }
+            "uint8" => {
+                let val = parse_u8(&resolved_value)?;
+                DynSolValue::Uint(U256::from(val), 8)
+            }
+            "string" => DynSolValue::String(resolved_value),
             "bytes" => {
                 let data = resolved_value.trim_start_matches("0x");
-                let bytes = hex::decode(data)
-                    .map_err(|e| eyre!("Invalid hex bytes '{}': {}", resolved_value, e))?;
-                Bytes::from(bytes).abi_encode()
+                let bytes = if data.is_empty() {
+                    Vec::new()
+                } else {
+                    hex::decode(data)
+                        .map_err(|e| eyre!("Invalid hex bytes '{}': {}", resolved_value, e))?
+                };
+                DynSolValue::Bytes(bytes)
             }
             "bool" => {
                 let b = resolved_value
                     .parse::<bool>()
                     .map_err(|e| eyre!("Invalid bool value '{}': {}", resolved_value, e))?;
-                b.abi_encode()
+                DynSolValue::Bool(b)
             }
-            _ => return Err(eyre!("Unsupported constructor arg type: {}", arg.arg_type)),
+            _ => return Err(eyre!("Unsupported arg type: {}", arg.arg_type)),
         };
-        encoded.extend_from_slice(&token_bytes);
+
+        values.push(value);
     }
+
+    Ok(values)
+}
+
+/// Encode constructor arguments using alloy with proper ABI encoding
+fn encode_constructor_args(
+    args: &[ConstructorArg],
+    deployed: &HashMap<String, String>,
+) -> Result<String> {
+    if args.is_empty() {
+        return Ok(String::from("0x"));
+    }
+
+    let values = args_to_dyn_sol_values(args, deployed)?;
+    let tuple = alloy::dyn_abi::DynSolValue::Tuple(values);
+    let encoded = tuple
+        .abi_encode_sequence()
+        .ok_or_else(|| eyre!("Failed to encode constructor arguments"))?;
 
     Ok(format!("0x{}", hex::encode(encoded)))
 }
 
-/// Encode function call with arguments
+/// Encode function call with arguments using proper ABI encoding
 fn encode_function_call(
     function_sig: &str,
     args: &[ConstructorArg],
@@ -409,23 +395,32 @@ fn encode_function_call(
     let encoded_args = if args.is_empty() {
         String::new()
     } else {
-        encode_constructor_args(args, deployed)?
-            .trim_start_matches("0x")
-            .to_string()
+        let values = args_to_dyn_sol_values(args, deployed)?;
+        let tuple = alloy::dyn_abi::DynSolValue::Tuple(values);
+        let encoded = tuple
+            .abi_encode_sequence()
+            .ok_or_else(|| eyre!("Failed to encode function arguments"))?;
+        hex::encode(encoded)
     };
 
     Ok(format!("0x{}{}", hex::encode(selector), encoded_args))
 }
 
 #[instrument(level = "trace", skip_all)]
-async fn get_nonce(port: u16, client: &Client, address: &str) -> Result<u64> {
+async fn rpc_call(
+    port: u16,
+    client: &Client,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value> {
     let url = format!("http://localhost:{}", port);
     let request_body = serde_json::json!({
         "jsonrpc": "2.0",
-        "method": "eth_getTransactionCount",
-        "params": [address, "latest"],
+        "method": method,
+        "params": params,
         "id": 1
     });
+
     let response: serde_json::Value = client
         .post(&url)
         .json(&request_body)
@@ -434,13 +429,25 @@ async fn get_nonce(port: u16, client: &Client, address: &str) -> Result<u64> {
         .json()
         .await?;
 
+    Ok(response)
+}
+
+#[instrument(level = "trace", skip_all)]
+async fn get_nonce(port: u16, client: &Client, address: &str) -> Result<u64> {
+    let response = rpc_call(
+        port,
+        client,
+        "eth_getTransactionCount",
+        serde_json::json!([address, "latest"]),
+    )
+    .await?;
+
     let nonce_hex = response["result"]
         .as_str()
         .ok_or_else(|| eyre!("Invalid nonce response"))?
         .trim_start_matches("0x");
 
-    let nonce = u64::from_str_radix(nonce_hex, 16)?;
-    Ok(nonce)
+    Ok(u64::from_str_radix(nonce_hex, 16)?)
 }
 
 #[instrument(level = "trace", skip_all)]
@@ -452,8 +459,6 @@ async fn execute_transaction(
     data: &str,
     nonce: u64,
 ) -> Result<String> {
-    let url = format!("http://localhost:{}", port);
-
     let mut params = serde_json::json!({
         "from": from,
         "data": data,
@@ -465,32 +470,21 @@ async fn execute_transaction(
         params["to"] = serde_json::json!(to_addr);
     }
 
-    let request_body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "eth_sendTransaction",
-        "params": [params],
-        "id": 1
-    });
+    let res = rpc_call(
+        port,
+        client,
+        "eth_sendTransaction",
+        serde_json::json!([params]),
+    )
+    .await?;
 
-    let res: serde_json::Value = client
-        .post(&url)
-        .json(&request_body)
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    if let Some(result) = res.get("result") {
-        if let Some(result) = result.as_str() {
-            let result = result.to_string();
-            return Ok(result);
-        }
-        return Err(eyre!("unexpected result: {res}"));
+    if let Some(result) = res.get("result").and_then(|r| r.as_str()) {
+        return Ok(result.to_string());
     }
     if let Some(error) = res.get("error") {
         return Err(eyre!("{error}"));
     }
-    return Err(eyre!("unexpected response: {res}"));
+    Err(eyre!("unexpected response: {res}"))
 }
 
 #[instrument(level = "trace", skip_all)]
@@ -499,21 +493,13 @@ async fn get_transaction_receipt(
     client: &Client,
     tx_hash: &str,
 ) -> Result<Option<String>> {
-    let url = format!("http://localhost:{}", port);
-    let request_body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "eth_getTransactionReceipt",
-        "params": [tx_hash],
-        "id": 1
-    });
-
-    let response: serde_json::Value = client
-        .post(&url)
-        .json(&request_body)
-        .send()
-        .await?
-        .json()
-        .await?;
+    let response = rpc_call(
+        port,
+        client,
+        "eth_getTransactionReceipt",
+        serde_json::json!([tx_hash]),
+    )
+    .await?;
 
     if let Some(receipt) = response.get("result") {
         if receipt.is_null() {
@@ -527,11 +513,51 @@ async fn get_transaction_receipt(
     Ok(None)
 }
 
+struct AnvilImpersonator<'a> {
+    port: u16,
+    client: &'a Client,
+    address: &'a str,
+}
+
+impl<'a> AnvilImpersonator<'a> {
+    async fn new(port: u16, client: &'a Client, address: &'a str) -> Result<Self> {
+        rpc_call(
+            port,
+            client,
+            "anvil_impersonateAccount",
+            serde_json::json!([address]),
+        )
+        .await?;
+        Ok(Self {
+            port,
+            client,
+            address,
+        })
+    }
+}
+
+impl<'a> Drop for AnvilImpersonator<'a> {
+    fn drop(&mut self) {
+        // Best effort cleanup - ignore errors
+        let port = self.port;
+        let client = self.client.clone();
+        let address = self.address.to_string();
+
+        tokio::spawn(async move {
+            let _ = rpc_call(
+                port,
+                &client,
+                "anvil_stopImpersonatingAccount",
+                serde_json::json!([address]),
+            )
+            .await;
+        });
+    }
+}
+
 #[instrument(level = "trace", skip_all)]
 async fn deploy_contracts(port: u16, config: &ChainConfig) -> Result<HashMap<String, String>> {
     let client = Client::new();
-    let url = format!("http://localhost:{}", port);
-
     let mut deployed_addresses = HashMap::new();
 
     // First, collect addresses from config (contracts with explicit address)
@@ -542,38 +568,25 @@ async fn deploy_contracts(port: u16, config: &ChainConfig) -> Result<HashMap<Str
         }
     }
 
-    // Impersonate owner
-    let request_body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "anvil_impersonateAccount",
-        "params": [OWNER_ADDRESS],
-        "id": 1
-    });
-    let _: serde_json::Value = client
-        .post(&url)
-        .json(&request_body)
-        .send()
-        .await?
-        .json()
-        .await?;
-
+    let _impersonator = AnvilImpersonator::new(port, &client, OWNER_ADDRESS).await?;
     let mut nonce = get_nonce(port, &client, OWNER_ADDRESS).await?;
 
-    // Deploy contracts sequentially, updating deployed_addresses after each
+    // Deploy contracts sequentially
     for contract in &config.contracts {
         if let Some(json_path) = &contract.contract_json_path {
             let name = contract.name.as_deref().unwrap_or("unnamed");
 
-            // Load creation bytecode
             let mut bytecode = load_creation_bytecode(json_path)?;
 
-            // Append constructor args if any (with reference resolution)
+            // Append constructor args if any
             if !contract.constructor_args.is_empty() {
                 let encoded_args =
                     encode_constructor_args(&contract.constructor_args, &deployed_addresses)?;
-                let bytecode_clean = bytecode.trim_start_matches("0x");
-                let encoded_args_clean = encoded_args.trim_start_matches("0x");
-                bytecode = format!("0x{}{}", bytecode_clean, encoded_args_clean);
+                bytecode = format!(
+                    "0x{}{}",
+                    bytecode.trim_start_matches("0x"),
+                    encoded_args.trim_start_matches("0x")
+                );
             }
 
             info!(
@@ -582,7 +595,6 @@ async fn deploy_contracts(port: u16, config: &ChainConfig) -> Result<HashMap<Str
                 bytecode.len()
             );
 
-            // Deploy (to = None for contract creation)
             match execute_transaction(port, &client, OWNER_ADDRESS, None, &bytecode, nonce).await {
                 Ok(tx_hash) => {
                     info!("Deployment tx for '{}': {}", name, tx_hash);
@@ -610,21 +622,6 @@ async fn deploy_contracts(port: u16, config: &ChainConfig) -> Result<HashMap<Str
         }
     }
 
-    // Stop impersonating
-    let request_body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "anvil_stopImpersonatingAccount",
-        "params": [OWNER_ADDRESS],
-        "id": 1
-    });
-    let _: serde_json::Value = client
-        .post(&url)
-        .json(&request_body)
-        .send()
-        .await?
-        .json()
-        .await?;
-
     Ok(deployed_addresses)
 }
 
@@ -634,34 +631,23 @@ async fn execute_config_transactions(
     config: &ChainConfig,
     deployed: &HashMap<String, String>,
 ) -> Result<()> {
-    let client = Client::new();
-    let url = format!("http://localhost:{}", port);
-
     if config.transactions.is_empty() {
         return Ok(());
     }
 
-    // Impersonate owner
-    let request_body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "anvil_impersonateAccount",
-        "params": [OWNER_ADDRESS],
-        "id": 1
-    });
-    let _: serde_json::Value = client
-        .post(&url)
-        .json(&request_body)
-        .send()
-        .await?
-        .json()
-        .await?;
+    info!(
+        "Found {} configured transactions",
+        config.transactions.len()
+    );
 
+    let client = Client::new();
+    let _impersonator = AnvilImpersonator::new(port, &client, OWNER_ADDRESS).await?;
     let mut nonce = get_nonce(port, &client, OWNER_ADDRESS).await?;
 
     for tx_config in &config.transactions {
         let name = tx_config.name.as_deref().unwrap_or("unnamed");
 
-        // Resolve target address (might be a reference)
+        // Resolve target address
         let target = if let Some(ref_name) = tx_config.target.strip_prefix('#') {
             deployed.get(ref_name).cloned().ok_or_else(|| {
                 eyre!(
@@ -688,79 +674,143 @@ async fn execute_config_transactions(
         info!("Executing transaction '{}' to {}", name, target);
 
         match execute_transaction(port, &client, OWNER_ADDRESS, Some(&target), &data, nonce).await {
-            Ok(tx_hash) => {
-                info!("Transaction '{}' sent: {}", name, tx_hash);
-            }
-            Err(e) => {
-                info!("Transaction '{}' failed: {}", name, e);
-            }
+            Ok(tx_hash) => info!("Transaction '{}' sent: {}", name, tx_hash),
+            Err(e) => info!("Transaction '{}' failed: {}", name, e),
         }
 
         nonce += 1;
     }
-
-    // Stop impersonating
-    let request_body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "anvil_stopImpersonatingAccount",
-        "params": [OWNER_ADDRESS],
-        "id": 1
-    });
-    let _: serde_json::Value = client
-        .post(&url)
-        .json(&request_body)
-        .send()
-        .await?
-        .json()
-        .await?;
 
     Ok(())
 }
 
 #[instrument(level = "trace", skip_all)]
-async fn initialize_contracts(port: u16, addresses: &ContractAddresses) -> Result<()> {
+async fn mint_test_nfts(port: u16, addresses: &mut ContractAddresses) -> Result<()> {
+    info!("Minting test NFTs...");
+
+    let Some(ref permissioned_minter) = addresses.hyper_permissioned_minter else {
+        info!("Skipping NFT minting: hyper_permissioned_minter not deployed");
+        return Ok(());
+    };
+
+    // Call tbaOf(0) to get zeroth_tba address
+    let tba_of_zero_calldata =
+        "0x27244d1e0000000000000000000000000000000000000000000000000000000000000000";
+    let zeroth_tba_result =
+        call_contract(port, &addresses.hypermap_proxy, tba_of_zero_calldata).await?;
+    info!("zeroth_tba_result: {}", zeroth_tba_result);
+
+    // Extract address from result (last 20 bytes / 40 hex chars)
+    let zeroth_tba = if zeroth_tba_result.len() >= 42 {
+        format!("0x{}", &zeroth_tba_result[zeroth_tba_result.len() - 40..])
+    } else {
+        return Err(eyre!("Hypermap is not initialized"));
+    };
+
+    info!("Resolved zeroth_tba from hypermap: {}", zeroth_tba);
+    addresses.zeroth_tba = Some(zeroth_tba.clone());
+
     let client = Client::new();
-    let url = format!("http://localhost:{}", port);
+    let _impersonator = AnvilImpersonator::new(port, &client, OWNER_ADDRESS).await?;
+    let nonce = get_nonce(port, &client, OWNER_ADDRESS).await?;
 
-    let request_body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "anvil_impersonateAccount",
-        "params": [OWNER_ADDRESS],
-        "id": 1
-    });
-    let _: serde_json::Value = client
-        .post(&url)
-        .json(&request_body)
-        .send()
-        .await?
-        .json()
-        .await?;
+    // Build mint calldata: mint(address to, bytes label, bytes initialization, address implementation)
+    let label_hex = "0x6f73"; // "os" label (2 bytes)
 
-    let mut nonce = get_nonce(port, &client, OWNER_ADDRESS).await?;
+    let mint_args = vec![
+        ConstructorArg {
+            arg_type: "address".to_string(),
+            value: OWNER_ADDRESS.to_string(),
+        },
+        ConstructorArg {
+            arg_type: "bytes".to_string(),
+            value: label_hex.to_string(),
+        },
+        ConstructorArg {
+            arg_type: "bytes".to_string(),
+            value: "0x".to_string(),
+        },
+        ConstructorArg {
+            arg_type: "address".to_string(),
+            value: permissioned_minter.clone(),
+        },
+    ];
 
-    let transactions = addresses.get_transactions();
-    for (to, data) in transactions {
-        match execute_transaction(port, &client, OWNER_ADDRESS, Some(&to), &data, nonce).await {
-            Ok(result) => info!("Transaction to {to}:  {result}"),
-            Err(e) => info!("Transaction failed: {e:?}"),
+    let deployed_map = HashMap::new();
+    let mint_calldata = encode_function_call(
+        "mint(address,bytes,bytes,address)",
+        &mint_args,
+        &deployed_map,
+    )?;
+
+    info!("Mint calldata: {}", mint_calldata);
+
+    // Build execute calldata: execute(address,uint256,bytes,uint8)
+    let execute_args = vec![
+        ConstructorArg {
+            arg_type: "address".to_string(),
+            value: addresses.hypermap_proxy.clone(),
+        },
+        ConstructorArg {
+            arg_type: "uint256".to_string(),
+            value: "0".to_string(),
+        },
+        ConstructorArg {
+            arg_type: "bytes".to_string(),
+            value: mint_calldata.clone(),
+        },
+        ConstructorArg {
+            arg_type: "uint8".to_string(),
+            value: "0".to_string(),
+        },
+    ];
+
+    let execute_calldata = encode_function_call(
+        "execute(address,uint256,bytes,uint8)",
+        &execute_args,
+        &deployed_map,
+    )?;
+
+    info!("Execute calldata: {}", execute_calldata);
+
+    // Send transaction to zeroth_tba
+    match execute_transaction(
+        port,
+        &client,
+        OWNER_ADDRESS,
+        Some(&zeroth_tba),
+        &execute_calldata,
+        nonce,
+    )
+    .await
+    {
+        Ok(tx_hash) => {
+            info!("Mint NFT transaction sent: {}", tx_hash);
+
+            sleep(Duration::from_millis(200)).await;
+
+            // Calculate token ID from label (.os)
+            let token_id_hex = "0xdeeac81ae11b64e7cab86d089c306e5d223552a630f02633ce170d2786ff1bbd";
+            let tba_of_calldata = format!("0x27244d1e{}", &token_id_hex[2..]);
+
+            if let Ok(dot_os_tba_result) =
+                call_contract(port, &addresses.hypermap_proxy, &tba_of_calldata).await
+            {
+                info!("dot_os_tba_result: {}", dot_os_tba_result);
+                if dot_os_tba_result.len() >= 42 {
+                    let dot_os_tba =
+                        format!("0x{}", &dot_os_tba_result[dot_os_tba_result.len() - 40..]);
+                    info!("Minted dot_os_tba: {}", dot_os_tba);
+                    addresses.dot_os_tba = Some(dot_os_tba);
+                }
+            }
         }
-        nonce += 1;
+        Err(e) => {
+            info!("Mint NFT transaction failed: {}", e);
+        }
     }
 
-    let request_body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "anvil_stopImpersonatingAccount",
-        "params": [OWNER_ADDRESS],
-        "id": 1
-    });
-    let _: serde_json::Value = client
-        .post(&url)
-        .json(&request_body)
-        .send()
-        .await?
-        .json()
-        .await?;
-
+    info!("Test NFTs minted successfully");
     Ok(())
 }
 
@@ -771,7 +821,6 @@ async fn apply_config_contracts(
     deployed: &HashMap<String, String>,
 ) -> Result<()> {
     let client = Client::new();
-    let url = format!("http://localhost:{}", port);
 
     // Only process contracts with explicit address (not deployed via contract_json_path)
     for contract in &config.contracts {
@@ -793,19 +842,13 @@ async fn apply_config_contracts(
         };
 
         if let Some(bytecode) = bytecode {
-            let request_body = serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "anvil_setCode",
-                "params": [address, bytecode.trim()],
-                "id": 1
-            });
-            let _: serde_json::Value = client
-                .post(&url)
-                .json(&request_body)
-                .send()
-                .await?
-                .json()
-                .await?;
+            rpc_call(
+                port,
+                &client,
+                "anvil_setCode",
+                serde_json::json!([address, bytecode.trim()]),
+            )
+            .await?;
 
             let name_info = contract.name.as_deref().unwrap_or("unnamed");
             info!("Set bytecode for contract '{}' at {}", name_info, address);
@@ -816,19 +859,14 @@ async fn apply_config_contracts(
             let normalized_slot = normalize_slot(slot);
             let hex_value = value.to_hex_string(deployed)?;
 
-            let request_body = serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "anvil_setStorageAt",
-                "params": [address, normalized_slot, hex_value],
-                "id": 1
-            });
-            let _: serde_json::Value = client
-                .post(&url)
-                .json(&request_body)
-                .send()
-                .await?
-                .json()
-                .await?;
+            rpc_call(
+                port,
+                &client,
+                "anvil_setStorageAt",
+                serde_json::json!([address, normalized_slot, hex_value]),
+            )
+            .await?;
+
             debug!("Set storage slot {} for {} to {}", slot, address, hex_value);
         }
     }
@@ -837,21 +875,44 @@ async fn apply_config_contracts(
 }
 
 #[instrument(level = "trace", skip_all)]
-async fn check_dot_os_tba(port: u16, addresses: &ContractAddresses) -> Result<bool> {
+async fn check_dot_os_tba(port: u16) -> Result<bool> {
+    let dot_os_tba = "0x9b3853358ede717fc7D4806cF75d7A4d4517A9C9";
     let client = Client::new();
-    let url = format!("http://localhost:{}", port);
 
-    let request_body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "eth_getCode",
-        "params": [&addresses.dot_os_tba, "latest"],
-        "id": 1
-    });
-
-    let response = client.post(&url).json(&request_body).send().await?;
-    let result: serde_json::Value = response.json().await?;
-    let code = result["result"].as_str().unwrap_or("0x");
+    let response = rpc_call(
+        port,
+        &client,
+        "eth_getCode",
+        serde_json::json!([dot_os_tba, "latest"]),
+    )
+    .await?;
+    let code = response["result"].as_str().unwrap_or("0x");
     Ok(code != "0x")
+}
+
+async fn process_configs(
+    port: u16,
+    default_config: Option<&ChainConfig>,
+    custom_config: Option<&ChainConfig>,
+) -> Result<HashMap<String, String>> {
+    let mut deployed_addresses = HashMap::new();
+
+    // Deploy contracts
+    for config in [default_config, custom_config].iter().filter_map(|c| *c) {
+        deployed_addresses.extend(deploy_contracts(port, config).await?);
+    }
+
+    // Apply bytecode at known addresses
+    for config in [default_config, custom_config].iter().filter_map(|c| *c) {
+        apply_config_contracts(port, config, &deployed_addresses).await?;
+    }
+
+    // Execute config transactions
+    for config in [default_config, custom_config].iter().filter_map(|c| *c) {
+        execute_config_transactions(port, config, &deployed_addresses).await?;
+    }
+
+    Ok(deployed_addresses)
 }
 
 #[instrument(level = "trace", skip_all)]
@@ -883,14 +944,12 @@ pub async fn start_chain_with_config(
     .await?;
 
     let default_config = load_config(&PathBuf::from(DEFAULT_CONFIG_PATH))?;
-
     let custom_config = if let Some(path) = custom_config_path {
         load_config(&path)?
     } else {
         None
     };
 
-    // Use custom config if available, otherwise default
     let active_config = custom_config
         .as_ref()
         .or(default_config.as_ref())
@@ -903,44 +962,13 @@ pub async fn start_chain_with_config(
 
     info!("Checking for Anvil on port {}...", port);
     if wait_for_anvil(port, 1, None).await.is_ok() {
-        // Deploy contracts first (sequentially with reference resolution)
-        let mut deployed_addresses = HashMap::new();
-        if let Some(config) = default_config.as_ref() {
-            deployed_addresses.extend(deploy_contracts(port, config).await?);
+        if !check_dot_os_tba(port).await? {
+            let deployed_addresses =
+                process_configs(port, default_config.as_ref(), custom_config.as_ref()).await?;
+            let mut addresses = ContractAddresses::from_config(active_config, &deployed_addresses)?;
+            mint_test_nfts(port, &mut addresses).await?;
+            addresses.print_summary();
         }
-        if let Some(config) = custom_config.as_ref() {
-            deployed_addresses.extend(deploy_contracts(port, config).await?);
-        }
-
-        // Load contract addresses (now with deployed addresses)
-        let addresses =
-            ContractAddresses::from_config(port, active_config, &deployed_addresses).await?;
-        info!("Loaded contract addresses from config");
-
-        if !check_dot_os_tba(port, &addresses).await? {
-            // Apply bytecode at known addresses (with reference resolution)
-            if let Some(config) = default_config.as_ref() {
-                apply_config_contracts(port, config, &deployed_addresses).await?;
-            }
-            if let Some(config) = custom_config.as_ref() {
-                apply_config_contracts(port, config, &deployed_addresses).await?;
-            }
-
-            // Execute config transactions
-            if let Some(config) = default_config.as_ref() {
-                execute_config_transactions(port, config, &deployed_addresses).await?;
-            }
-            if let Some(config) = custom_config.as_ref() {
-                execute_config_transactions(port, config, &deployed_addresses).await?;
-            }
-
-            // Finally initialize
-            initialize_contracts(port, &addresses).await?;
-        }
-
-        // Print summary
-        addresses.print_summary();
-
         return Ok(None);
     }
 
@@ -948,6 +976,7 @@ pub async fn start_chain_with_config(
     if tracing {
         args.push("--tracing".to_string());
     }
+
     let mut child = Command::new("anvil")
         .args(args)
         .current_dir(KIT_CACHE)
@@ -964,66 +993,20 @@ pub async fn start_chain_with_config(
         return Err(e);
     }
 
-    // Deploy contracts first (sequentially with reference resolution)
-    let mut deployed_addresses = HashMap::new();
-    if let Some(config) = default_config.as_ref() {
-        match deploy_contracts(port, config).await {
-            Ok(addrs) => deployed_addresses.extend(addrs),
+    let deployed_addresses =
+        match process_configs(port, default_config.as_ref(), custom_config.as_ref()).await {
+            Ok(addrs) => addrs,
             Err(e) => {
                 let _ = child.kill();
-                return Err(e.wrap_err("Failed to deploy contracts from default config"));
+                return Err(e.wrap_err("Failed to process configs"));
             }
-        }
-    }
-    if let Some(config) = custom_config.as_ref() {
-        match deploy_contracts(port, config).await {
-            Ok(addrs) => deployed_addresses.extend(addrs),
-            Err(e) => {
-                let _ = child.kill();
-                return Err(e.wrap_err("Failed to deploy contracts from custom config"));
-            }
-        }
-    }
+        };
 
-    // Load contract addresses (now with deployed addresses)
-    let addresses =
-        ContractAddresses::from_config(port, active_config, &deployed_addresses).await?;
-    info!("Loaded contract addresses from config");
+    let mut addresses = ContractAddresses::from_config(active_config, &deployed_addresses)?;
 
-    if !check_dot_os_tba(port, &addresses).await? {
-        // Apply bytecode at known addresses (with reference resolution)
-        if let Some(config) = default_config.as_ref() {
-            if let Err(e) = apply_config_contracts(port, &config, &deployed_addresses).await {
-                let _ = child.kill();
-                return Err(e.wrap_err("Failed to apply default config contracts"));
-            }
-        }
-        if let Some(config) = custom_config.as_ref() {
-            if let Err(e) = apply_config_contracts(port, &config, &deployed_addresses).await {
-                let _ = child.kill();
-                return Err(e.wrap_err("Failed to apply custom config contracts"));
-            }
-        }
-
-        // Execute config transactions
-        if let Some(config) = default_config.as_ref() {
-            if let Err(e) = execute_config_transactions(port, &config, &deployed_addresses).await {
-                let _ = child.kill();
-                return Err(e.wrap_err("Failed to execute default config transactions"));
-            }
-        }
-        if let Some(config) = custom_config.as_ref() {
-            if let Err(e) = execute_config_transactions(port, &config, &deployed_addresses).await {
-                let _ = child.kill();
-                return Err(e.wrap_err("Failed to execute custom config transactions"));
-            }
-        }
-
-        // Finally initialize
-        if let Err(e) = initialize_contracts(port, &addresses).await {
-            let _ = child.kill();
-            return Err(e.wrap_err("Failed to initialize contracts"));
-        }
+    if let Err(e) = mint_test_nfts(port, &mut addresses).await {
+        let _ = child.kill();
+        return Err(e.wrap_err("Failed to mint test NFTs"));
     }
 
     if let Err(e) = verify_contracts(port, &addresses).await {
@@ -1031,7 +1014,6 @@ pub async fn start_chain_with_config(
         return Err(e.wrap_err("Contract verification failed"));
     }
 
-    // Print summary
     addresses.print_summary();
 
     Ok(Some(child))
@@ -1044,29 +1026,17 @@ async fn wait_for_anvil(
     mut recv_kill: Option<BroadcastRecvBool>,
 ) -> Result<()> {
     let client = Client::new();
-    let url = format!("http://localhost:{}", port);
 
     for _ in 0..max_attempts {
-        let request_body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_blockNumber",
-            "params": [],
-            "id": 1
-        });
-
-        let response = client.post(&url).json(&request_body).send().await;
-
-        match response {
-            Ok(resp) if resp.status().is_success() => {
-                let result: serde_json::Value = resp.json().await?;
-                if let Some(block_number) = result["result"].as_str() {
-                    if block_number.starts_with("0x") {
-                        info!("Anvil is ready on port {}.", port);
-                        return Ok(());
-                    }
+        if let Ok(response) =
+            rpc_call(port, &client, "eth_blockNumber", serde_json::json!([])).await
+        {
+            if let Some(block_number) = response["result"].as_str() {
+                if block_number.starts_with("0x") {
+                    info!("Anvil is ready on port {}.", port);
+                    return Ok(());
                 }
             }
-            _ => (),
         }
 
         if let Some(ref mut recv_kill) = recv_kill {
@@ -1092,21 +1062,13 @@ async fn wait_for_anvil(
 #[instrument(level = "trace", skip_all)]
 pub async fn call_contract(port: u16, target: &str, data: &str) -> Result<String> {
     let client = Client::new();
-    let url = format!("http://localhost:{}", port);
-
-    let request_body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "eth_call",
-        "params": [{
-            "to": target,
-            "data": data,
-        }, "latest"],
-        "id": 1
-    });
-
-    let response = client.post(&url).json(&request_body).send().await?;
-
-    let result: serde_json::Value = response.json().await?;
+    let result = rpc_call(
+        port,
+        &client,
+        "eth_call",
+        serde_json::json!([{"to": target, "data": data}, "latest"]),
+    )
+    .await?;
 
     if let Some(output) = result.get("result").and_then(|r| r.as_str()) {
         return Ok(output.to_string());
@@ -1160,12 +1122,14 @@ pub async fn execute(
         custom_config_path,
     )
     .await?;
+
     let Some(mut child) = child else {
         return Err(eyre!(
             "Port {} is already in use by another anvil process",
             port
         ));
     };
+
     let child_id = child.id() as i32;
 
     let cleanup_anvil = tokio::spawn(async move {
@@ -1174,10 +1138,8 @@ pub async fn execute(
     });
 
     let _ = child.wait();
-
     let _ = handle_signals.await;
     let _ = cleanup_anvil.await;
-
     let _ = send_to_kill.send(true);
 
     Ok(())
