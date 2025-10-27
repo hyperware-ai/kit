@@ -329,6 +329,7 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                 let mut http_method = None;
                 let mut http_path = None;
 
+                // scan backward/upward to get method/path from a // HTTP: comment
                 if attr_type == "http" {
                     let mut j = i;
                     while j > 0 {
@@ -340,13 +341,11 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                         if prev_line.starts_with("// HTTP:") {
                             let rest = prev_line.trim_start_matches("// HTTP:").trim();
                             let tokens: Vec<&str> = rest.split_whitespace().collect();
-                            if let Some(method_token) = tokens.get(0) {
+                            if let Some(method_token) = tokens.first() {
                                 http_method = Some(method_token.to_uppercase());
                             }
                             if let Some(path_token) = tokens.get(1) {
-                                if path_token.starts_with('/') {
-                                    http_path = Some(path_token.to_string());
-                                }
+                                http_path = Some(path_token.to_string());
                             }
                             break;
                         } else if prev_line.starts_with("//") {
@@ -672,25 +671,16 @@ fn generate_typescript_function(
     let mut param_types = Vec::new();
     let mut full_return_type = "void".to_string();
     let mut unwrapped_return_type = "void".to_string();
-    let mut http_method = signature
+
+    let http_method = signature
         .http_method
         .clone()
         .unwrap_or_else(|| "POST".to_string());
-    if http_method.is_empty() {
-        http_method = "POST".to_string();
-    }
-    http_method = http_method.to_uppercase();
-
-    let mut http_path = signature
+    let http_path = signature
         .http_path
         .clone()
         .unwrap_or_else(|| "/api".to_string());
-    if http_path.is_empty() {
-        http_path = "/api".to_string();
-    }
-    if !http_path.starts_with('/') {
-        http_path = format!("/{}", http_path.trim_start_matches('/'));
-    }
+
     let actual_param_type: String;
 
     for field in &signature.fields {
