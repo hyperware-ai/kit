@@ -36,6 +36,9 @@ mod caller_utils_generator;
 mod caller_utils_ts_generator;
 mod wit_generator;
 
+// Default Rust toolchain to use for builds
+pub const DEFAULT_RUST_TOOLCHAIN: &str = "+1.85.1";
+
 const PY_VENV_NAME: &str = "process_env";
 const JAVASCRIPT_SRC_PATH: &str = "src/lib.js";
 const PYTHON_SRC_PATH: &str = "src/lib.py";
@@ -727,6 +730,7 @@ fn is_up_to_date(
     features: &str,
     cludes: &str,
     package_dir: &Path,
+    hyperapp: bool,
 ) -> Result<bool> {
     let old_features = fs::read_to_string(&build_with_features_path).ok();
     let old_cludes = fs::read_to_string(&build_with_cludes_path).ok();
@@ -754,12 +758,21 @@ fn is_up_to_date(
         && package_dir.join("pkg").join("api.zip").exists()
         && file_with_extension_exists(&package_dir.join("pkg"), "wasm")
     {
+        let exclude_files = HashSet::from(["Cargo.lock", "api.zip"]);
+        let exclude_extensions = HashSet::from(["wasm"]);
+        let mut exclude_dirs = HashSet::from(["target", "node_modules", "dist"]);
+        let mut must_exist_dirs = HashSet::from(["target"]);
+        if hyperapp {
+            exclude_dirs.insert("api");
+            must_exist_dirs.insert("api");
+        }
+
         let (mut source_time, build_time) = match get_most_recent_modified_time(
             package_dir,
-            &HashSet::from(["Cargo.lock", "api.zip"]),
-            &HashSet::from(["wasm"]),
-            &HashSet::from(["target"]),
-            &mut HashSet::from(["target"]),
+            &exclude_files,
+            &exclude_extensions,
+            &exclude_dirs,
+            &mut must_exist_dirs,
             false,
         ) {
             Ok(v) => v,
@@ -786,10 +799,10 @@ fn is_up_to_date(
             let dep_package_dir = get_cargo_package_path(&package)?;
             let (dep_source_time, _) = match get_most_recent_modified_time(
                 &dep_package_dir,
-                &HashSet::from(["Cargo.lock", "api.zip"]),
-                &HashSet::from(["wasm"]),
-                &HashSet::from(["target"]),
-                &mut HashSet::from(["target"]),
+                &exclude_files,
+                &exclude_extensions,
+                &exclude_dirs,
+                &mut must_exist_dirs,
                 false,
             ) {
                 Ok(v) => v,
@@ -942,6 +955,7 @@ async fn compile_rust_wasm_process(
     process_dir: &Path,
     features: &str,
     verbose: bool,
+    toolchain: &str,
 ) -> Result<()> {
     let Some(package_dir) = process_dir.parent() else {
         return Err(eyre!(
@@ -981,7 +995,7 @@ async fn compile_rust_wasm_process(
 
     // Build the module using Cargo
     let mut args = vec![
-        "+stable",
+        toolchain,
         "build",
         "-p",
         &process_name,
@@ -1148,9 +1162,10 @@ async fn compile_package_item(
     is_py_process: bool,
     is_js_process: bool,
     verbose: bool,
+    toolchain: String,
 ) -> Result<()> {
     if is_rust_process {
-        compile_rust_wasm_process(&path, &features, verbose).await?;
+        compile_rust_wasm_process(&path, &features, verbose, &toolchain).await?;
     } else if is_py_process {
         let python = get_python_version(None, None)?
             .ok_or_else(|| eyre!("kit requires Python 3.10 or newer"))?;
@@ -1209,6 +1224,7 @@ async fn fetch_dependencies(
     hyperapp: bool,
     force: bool,
     verbose: bool,
+    toolchain: &str,
 ) -> Result<()> {
     if let Err(e) = Box::pin(execute(
         package_dir,
@@ -1229,6 +1245,7 @@ async fn fetch_dependencies(
         force,
         verbose,
         true,
+        toolchain,
     ))
     .await
     {
@@ -1267,6 +1284,7 @@ async fn fetch_dependencies(
             force,
             verbose,
             false,
+            toolchain,
         ))
         .await?;
         fetch_local_built_dependency(apis, wasm_paths, &local_dependency)?;
@@ -1453,6 +1471,7 @@ async fn check_and_populate_dependencies(
     metadata: &Erc721Metadata,
     skip_deps_check: bool,
     verbose: bool,
+    toolchain: &str,
 ) -> Result<(HashMap<String, Vec<u8>>, HashSet<String>)> {
     let mut checked_rust = false;
     let mut checked_py = false;
@@ -1468,15 +1487,15 @@ async fn check_and_populate_dependencies(
         let path = entry.path();
         if path.is_dir() {
             if path.join(RUST_SRC_PATH).exists() && !checked_rust && !skip_deps_check {
-                let deps = check_rust_deps()?;
-                get_deps(deps, &mut recv_kill, false, verbose).await?;
+                let deps = check_rust_deps(toolchain)?;
+                get_deps(deps, &mut recv_kill, false, verbose, toolchain).await?;
                 checked_rust = true;
             } else if path.join(PYTHON_SRC_PATH).exists() && !checked_py {
                 check_py_deps()?;
                 checked_py = true;
             } else if path.join(JAVASCRIPT_SRC_PATH).exists() && !checked_js && !skip_deps_check {
                 let deps = check_js_deps()?;
-                get_deps(deps, &mut recv_kill, false, verbose).await?;
+                get_deps(deps, &mut recv_kill, false, verbose, toolchain).await?;
                 checked_js = true;
             } else if Some("api") == path.file_name().and_then(|s| s.to_str()) {
                 // read api files: to be used in build
@@ -1545,7 +1564,7 @@ fn is_cluded(path: &Path, include: &HashSet<PathBuf>, exclude: &HashSet<PathBuf>
 }
 
 /// package dir looks like:
-/// ```
+///
 /// metadata.json
 /// api/                                  <- optional
 ///   my_package:publisher.os-v0.wit
@@ -1565,7 +1584,6 @@ fn is_cluded(path: &Path, include: &HashSet<PathBuf>, exclude: &HashSet<PathBuf>
 ///   target/                             <- built
 ///     api/
 ///     wit/
-/// ```
 #[instrument(level = "trace", skip_all)]
 async fn compile_package(
     package_dir: &Path,
@@ -1584,11 +1602,18 @@ async fn compile_package(
     verbose: bool,
     hyperapp_processed_projects: Option<Vec<PathBuf>>,
     ignore_deps: bool, // for internal use; may cause problems when adding recursive deps
+    toolchain: &str,
 ) -> Result<()> {
     let metadata = read_and_update_metadata(package_dir)?;
     let mut wasm_paths = HashSet::new();
-    let (mut apis, dependencies) =
-        check_and_populate_dependencies(package_dir, &metadata, skip_deps_check, verbose).await?;
+    let (mut apis, dependencies) = check_and_populate_dependencies(
+        package_dir,
+        &metadata,
+        skip_deps_check,
+        verbose,
+        toolchain,
+    )
+    .await?;
 
     info!("dependencies: {dependencies:?}");
     if !ignore_deps && !dependencies.is_empty() {
@@ -1609,6 +1634,7 @@ async fn compile_package(
             hyperapp,
             force,
             verbose,
+            toolchain,
         )
         .await?
     }
@@ -1665,6 +1691,7 @@ async fn compile_package(
             is_py_process,
             is_js_process,
             verbose.clone(),
+            toolchain.to_string(),
         ));
     }
     while let Some(res) = tasks.join_next().await {
@@ -1748,6 +1775,7 @@ pub async fn execute(
     force: bool,
     verbose: bool,
     ignore_deps: bool, // for internal use; may cause problems when adding recursive deps
+    toolchain: &str,
 ) -> Result<()> {
     debug!(
         "execute:
@@ -1795,6 +1823,7 @@ pub async fn execute(
             features,
             &cludes,
             &package_dir,
+            hyperapp,
         )?
     {
         return Ok(());
@@ -1859,7 +1888,7 @@ pub async fn execute(
         if !skip_deps_check {
             let mut recv_kill = make_fake_kill_chan();
             let deps = check_js_deps()?;
-            get_deps(deps, &mut recv_kill, false, verbose).await?;
+            get_deps(deps, &mut recv_kill, false, verbose, DEFAULT_RUST_TOOLCHAIN).await?;
         }
         let valid_node = get_newest_valid_node_version(None, None)?;
         for ui_dir in ui_dirs {
@@ -1885,6 +1914,7 @@ pub async fn execute(
             verbose,
             hyperapp_processed_projects,
             ignore_deps,
+            toolchain,
         )
         .await?;
     }

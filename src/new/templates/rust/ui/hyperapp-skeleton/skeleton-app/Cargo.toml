@@ -1,0 +1,33 @@
+[dependencies]
+anyhow = "1.0"
+process_macros = "0.1"
+serde_json = "1.0"
+wit-bindgen = "0.42.1"
+
+[dependencies.hyperapp_skeleton_caller_utils]
+optional = true
+path = "../target/hyperapp-skeleton-caller-utils"
+
+[dependencies.hyperprocess_macro]
+git = "https://github.com/hyperware-ai/hyperprocess-macro"
+rev = "aaf7e02"
+
+[dependencies.hyperware_process_lib]
+features = ["hyperapp"]
+git = "https://github.com/hyperware-ai/process_lib"
+rev = "e8b065179ce5d15893a23142416e59c87e0f31f6"
+
+[dependencies.serde]
+features = ["derive"]
+version = "1.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[package]
+edition = "2021"
+name = "skeleton-app"
+version = "0.1.0"
+
+[package.metadata.component]
+package = "hyperware:process"

@@ -83,3 +83,6 @@ name = "kit"
 path = "src/main.rs"
 
 [lib]
+
+[dev-dependencies]
+tempfile = "3"
