@@ -61,10 +61,16 @@ impl ContractAddresses {
         for contract in &config.contracts {
             if let Some(name) = &contract.name {
                 // Пропускаем известные контракты
-                if !matches!(name.as_str(), 
-                    "hypermap-proxy" | "hypermap-impl" | "hyperaccount" | 
-                    "erc6551registry" | "multicall" | "create2" |
-                    "hyperaccount-9char-commit-minter" | "hyperaccount-permissioned-minter"
+                if !matches!(
+                    name.as_str(),
+                    "hypermap-proxy"
+                        | "hypermap-impl"
+                        | "hyperaccount"
+                        | "erc6551registry"
+                        | "multicall"
+                        | "create2"
+                        | "hyperaccount-9char-commit-minter"
+                        | "hyperaccount-permissioned-minter"
                 ) {
                     if let Some(addr) = deployed.get(name) {
                         other_contracts.insert(name.clone(), addr.clone());
@@ -101,13 +107,13 @@ impl ContractAddresses {
         if let Some(addr) = &self.hyper_permissioned_minter {
             info!("{} permissioned_minter", addr);
         }
-        
+
         if !self.other_contracts.is_empty() {
             for (name, addr) in &self.other_contracts {
                 info!("{} {}", addr, name);
             }
         }
-        
+
         if let Some(addr) = &self.zeroth_tba {
             info!("{} zeroth_tba (minted)", addr);
         }
@@ -576,7 +582,11 @@ impl<'a> Drop for AnvilImpersonator<'a> {
 }
 
 #[instrument(level = "trace", skip_all)]
-async fn deploy_contracts(port: u16, config: &ChainConfig, deployed: &HashMap<String, String>) -> Result<HashMap<String, String>> {
+async fn deploy_contracts(
+    port: u16,
+    config: &ChainConfig,
+    deployed: &HashMap<String, String>,
+) -> Result<HashMap<String, String>> {
     let client = Client::new();
     let mut deployed_addresses = deployed.clone();
 
