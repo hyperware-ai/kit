@@ -35,6 +35,7 @@ struct ContractAddresses {
     hyper_permissioned_minter: Option<String>,
     zeroth_tba: Option<String>,
     dot_os_tba: Option<String>,
+    other_contracts: HashMap<String, String>,
 }
 
 impl ContractAddresses {
@@ -56,6 +57,22 @@ impl ContractAddresses {
             config.get_address_by_name(name)
         };
 
+        let mut other_contracts = HashMap::new();
+        for contract in &config.contracts {
+            if let Some(name) = &contract.name {
+                // Пропускаем известные контракты
+                if !matches!(name.as_str(), 
+                    "hypermap-proxy" | "hypermap-impl" | "hyperaccount" | 
+                    "erc6551registry" | "multicall" | "create2" |
+                    "hyperaccount-9char-commit-minter" | "hyperaccount-permissioned-minter"
+                ) {
+                    if let Some(addr) = deployed.get(name) {
+                        other_contracts.insert(name.clone(), addr.clone());
+                    }
+                }
+            }
+        }
+
         Ok(Self {
             hypermap_proxy: resolve("hypermap-proxy")?,
             hypermap_impl: resolve("hypermap-impl")?,
@@ -67,33 +84,36 @@ impl ContractAddresses {
             hyper_permissioned_minter: resolve_optional("hyperaccount-permissioned-minter"),
             zeroth_tba: None,
             dot_os_tba: None,
+            other_contracts,
         })
     }
-
     fn print_summary(&self) {
-        info!("╔════════════════════════════════════════════════════════════════════════╗");
-        info!("║              Contract Addresses Summary                                ║");
-        info!("╠════════════════════════════════════════════════════════════════════════╣");
-        info!("║ hypermap_proxy:            {}  ║", self.hypermap_proxy);
-        info!("║ hypermap_impl:             {}  ║", self.hypermap_impl);
-        info!("║ hyperaccount:              {}  ║", self.hyperaccount);
-        info!("║ erc6551registry:           {}  ║", self.erc6551registry);
-        info!("║ multicall:                 {}  ║", self.multicall);
-        info!("║ create2:                   {}  ║", self.create2);
+        info!("Contract Addresses:");
+        info!("{} hypermap_proxy", self.hypermap_proxy);
+        info!("{} hypermap_impl", self.hypermap_impl);
+        info!("{} hyperaccount", self.hyperaccount);
+        info!("{} erc6551registry", self.erc6551registry);
+        info!("{} multicall", self.multicall);
+        info!("{} create2", self.create2);
         if let Some(addr) = &self.hyper_9char_commit_minter {
-            info!("║ 9char_commit_minter:       {}  ║", addr);
+            info!("{} 9char_commit_minter", addr);
         }
         if let Some(addr) = &self.hyper_permissioned_minter {
-            info!("║ permissioned_minter:       {}  ║", addr);
+            info!("{} permissioned_minter", addr);
         }
+        
+        if !self.other_contracts.is_empty() {
+            for (name, addr) in &self.other_contracts {
+                info!("{} {}", addr, name);
+            }
+        }
+        
         if let Some(addr) = &self.zeroth_tba {
-            info!("╠════════════════════════════════════════════════════════════════════════╣");
-            info!("║ zeroth_tba (minted):       {}  ║", addr);
+            info!("{} zeroth_tba (minted)", addr);
         }
         if let Some(addr) = &self.dot_os_tba {
-            info!("║ dot_os_tba (minted):       {}  ║", addr);
+            info!("{} dot_os_tba (minted)", addr);
         }
-        info!("╚════════════════════════════════════════════════════════════════════════╝");
     }
 }
 
@@ -556,9 +576,9 @@ impl<'a> Drop for AnvilImpersonator<'a> {
 }
 
 #[instrument(level = "trace", skip_all)]
-async fn deploy_contracts(port: u16, config: &ChainConfig) -> Result<HashMap<String, String>> {
+async fn deploy_contracts(port: u16, config: &ChainConfig, deployed: &HashMap<String, String>) -> Result<HashMap<String, String>> {
     let client = Client::new();
-    let mut deployed_addresses = HashMap::new();
+    let mut deployed_addresses = deployed.clone();
 
     // First, collect addresses from config (contracts with explicit address)
     for contract in &config.contracts {
@@ -897,18 +917,49 @@ async fn process_configs(
 ) -> Result<HashMap<String, String>> {
     let mut deployed_addresses = HashMap::new();
 
-    // Deploy contracts
-    for config in [default_config, custom_config].iter().filter_map(|c| *c) {
-        deployed_addresses.extend(deploy_contracts(port, config).await?);
+    // Step 1: Collect ALL pre-registered addresses from both configs FIRST
+    // This ensures custom config can reference default config contracts
+    if let Some(config) = default_config {
+        for contract in &config.contracts {
+            if let (Some(name), Some(address)) = (&contract.name, &contract.address) {
+                deployed_addresses.insert(name.clone(), address.clone());
+                debug!("Pre-registered from default config: {} = {}", name, address);
+            }
+        }
+    }
+    if let Some(config) = custom_config {
+        for contract in &config.contracts {
+            if let (Some(name), Some(address)) = (&contract.name, &contract.address) {
+                deployed_addresses.insert(name.clone(), address.clone());
+                debug!("Pre-registered from custom config: {} = {}", name, address);
+            }
+        }
     }
 
-    // Apply bytecode at known addresses
-    for config in [default_config, custom_config].iter().filter_map(|c| *c) {
+    // Step 2: Deploy contracts from default config first
+    // Now deployed_addresses contains all pre-registered addresses
+    if let Some(config) = default_config {
+        deployed_addresses.extend(deploy_contracts(port, config, &deployed_addresses).await?);
+    }
+
+    // Step 3: Deploy contracts from custom config (can reference default config contracts)
+    if let Some(config) = custom_config {
+        deployed_addresses.extend(deploy_contracts(port, config, &deployed_addresses).await?);
+    }
+
+    // Step 4: Apply bytecode at known addresses
+    if let Some(config) = default_config {
+        apply_config_contracts(port, config, &deployed_addresses).await?;
+    }
+    if let Some(config) = custom_config {
         apply_config_contracts(port, config, &deployed_addresses).await?;
     }
 
-    // Execute config transactions
-    for config in [default_config, custom_config].iter().filter_map(|c| *c) {
+    // Step 5: Execute config transactions
+    if let Some(config) = default_config {
+        execute_config_transactions(port, config, &deployed_addresses).await?;
+    }
+    if let Some(config) = custom_config {
         execute_config_transactions(port, config, &deployed_addresses).await?;
     }
 
