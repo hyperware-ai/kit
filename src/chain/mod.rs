@@ -60,7 +60,6 @@ impl ContractAddresses {
         let mut other_contracts = HashMap::new();
         for contract in &config.contracts {
             if let Some(name) = &contract.name {
-                // Пропускаем известные контракты
                 if !matches!(
                     name.as_str(),
                     "hypermap-proxy"
