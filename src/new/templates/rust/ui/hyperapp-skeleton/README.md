@@ -179,7 +179,11 @@ Add system permissions in `pkg/manifest.json`:
 
 These are required to message other local processes.
 They can also be granted so other local processes can message us.
-There is also a `request_networking` field that must be true to send messages over the network p2p.
+
+If sending messages between nodes, set:
+```json
+"request_networking"=true,
+```
 
 ### 4. Update Frontend
 
