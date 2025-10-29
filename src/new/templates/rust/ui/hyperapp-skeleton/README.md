@@ -221,12 +221,6 @@ In particular, note the example applications `resources/example-apps/sign/`, `re
 `sign` and `id` demonstrate local messaging.
 `file-explorer` demonstrates VFS interactions.
 
-<<<<<<< Updated upstream
-Expand the prompt and/or `instructions.md` into a detailed implementation plan.
-The implementor will be starting from this existing template that exists at `skeleton-app/` and `ui/`.
-
-=======
->>>>>>> Stashed changes
 Note in particular that bindings for the UI will be generated when the app is built with `kit build --hyperapp`.
 As such, first design and implement the backend; the interface will be generated from the backend; finally design and implement the frontend to consume the interface.
 Subsequent changes to the interface must follow this pattern as well: start in backend, generate interface, finish in frontend
