@@ -559,6 +559,8 @@ async fn execute(
 
 #[instrument(level = "trace", skip_all)]
 async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
+    let is_offline = std::env::var("KIT_OFFLINE").is_ok();
+
     Ok(command!()
         .name("kit")
         .version(env!("CARGO_PKG_VERSION"))
@@ -589,11 +591,15 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .default_value("latest")
                 .value_parser(PossibleValuesParser::new({
                     let mut possible_values = vec!["latest".to_string()];
-                    let mut remote_values = boot_fake_node::find_releases_with_asset_if_online(
-                        None,
-                        None,
-                        &boot_fake_node::get_platform_runtime_name(true)?
-                    ).await.unwrap_or_default();
+                    let mut remote_values = if is_offline {
+                        Vec::new()
+                    } else {
+                        boot_fake_node::find_releases_with_asset_if_online(
+                            None,
+                            None,
+                            &boot_fake_node::get_platform_runtime_name(true)?
+                        ).await.unwrap_or_default()
+                    };
                     remote_values.truncate(MAX_REMOTE_VALUES);
                     //if remote_values.len() == 0 {
                     //    possible_values = vec![];
@@ -688,11 +694,15 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .default_value("latest")
                 .value_parser(PossibleValuesParser::new({
                     let mut possible_values = vec!["latest".to_string()];
-                    let mut remote_values = boot_fake_node::find_releases_with_asset_if_online(
-                        None,
-                        None,
-                        &boot_fake_node::get_platform_runtime_name(false)?
-                    ).await?;
+                    let mut remote_values = if is_offline {
+                        Vec::new()
+                    } else {
+                        boot_fake_node::find_releases_with_asset_if_online(
+                            None,
+                            None,
+                            &boot_fake_node::get_platform_runtime_name(false)?
+                        ).await?
+                    };
                     remote_values.truncate(MAX_REMOTE_VALUES);
                     //if remote_values.len() == 0 {
                     //    possible_values = vec![];
