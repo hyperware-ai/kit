@@ -3,38 +3,16 @@
 A minimal, well-commented skeleton application for the Hyperware platform using the Hyperapp framework.
 This skeleton provides a starting point for building Hyperware applications with a React/TypeScript frontend and Rust backend.
 
-Either prompt your favorite LLM directly with instructions on how to build your app or add them to `instructions.md`!
+Example prompt (works well with Codex):
 
-Recommended usage:
-- Create a skeleton repo using a kit template:
-  ```bash
-  kit new foo --template hyperapp-skeleton --ui
-  cd foo
-  ```
-- Write a detailed document describing what you want your app to do.
-  Save this in `instructions.md`.
-- Prompt your LLM agent (i.e. Claude Code) with something like:
-  ```
-  ## GOAL
+Use `kit new myappname --template hyperapp-skeleton --ui`, (replacing myappname with appropriate app name) to make a template in `/desired_folder`, which you will modify to build the following app:
 
-  <One-sentence description of app here>
+Insert your app spec here, e.g.:
+Todo List with P2P Sync.
+A collaborative TODO list where items sync between nodes.
 
-  ## Instructions
-
-  Read the README.md and follow the Instructions > Create an implementation plan
-  ```
-
-- After creating an implementation plan, clear your LLM agent's context and then prompt it again with something like:
-
-  ```
-  ## GOAL
-
-  <One-sentence description of app here>
-
-  ## Instructions
-
-  Read the README.md and follow the Instructions > Implement the plan
-  ```
+Write a spec, and then implement it step by step. Use the README.md given in hyperapp-skeleton to find instructions on specific details.
+At the end, I should be able to run `kit bs —hyperapp` and manually test that the app works.
 
 The rest of this document is aimed at *LLMs* not *humans*.
 
