@@ -706,7 +706,7 @@ fn generate_typescript_function(
         )
     };
 
-    // Function returns the unwrapped type since parseResultResponse extracts it
+    // Function returns the unwrapped type since parseResponse extracts it
     let function_impl = format!(
         "/**\n * {}\n{} * @returns Promise with result\n * @throws ApiError if the request fails\n */\nexport async function {}({}): Promise<{}> {{\n{}\n\n  return await apiRequest<{}, {}>('{}', 'POST', data);\n}}",
         camel_function_name,
@@ -789,16 +789,20 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
 
     ts_content.push_str("// Parser for the Result-style responses\n");
     ts_content.push_str("// eslint-disable-next-line @typescript-eslint/no-explicit-any\n");
-    ts_content.push_str("export function parseResultResponse<T>(response: any): T {\n");
+    ts_content.push_str("export function parseResponse<T>(response: any): T {\n");
+    ts_content.push_str("  try {\n");
     ts_content.push_str(
-        "  if ('Ok' in response && response.Ok !== undefined && response.Ok !== null) {\n",
+        "    if ('Ok' in response && response.Ok !== undefined && response.Ok !== null) {\n",
     );
-    ts_content.push_str("    return response.Ok as T;\n");
-    ts_content.push_str("  }\n\n");
-    ts_content.push_str("  if ('Err' in response && response.Err !== undefined) {\n");
-    ts_content.push_str("    throw new ApiError(`API returned an error`, response.Err);\n");
-    ts_content.push_str("  }\n\n");
-    ts_content.push_str("  throw new ApiError('Invalid API response format');\n");
+    ts_content.push_str("      return response.Ok as T;\n");
+    ts_content.push_str("    }\n\n");
+    ts_content.push_str("    if ('Err' in response && response.Err !== undefined) {\n");
+    ts_content.push_str("      throw new ApiError(`API returned an error`, response.Err);\n");
+    ts_content.push_str("    }\n");
+    ts_content.push_str("  } catch (e) {\n");
+    ts_content.push_str("    return response as T;\n");
+    ts_content.push_str("  }\n");
+    ts_content.push_str("  return response as T;\n");
     ts_content.push_str("}\n\n");
 
     ts_content.push_str("/**\n");
@@ -828,7 +832,7 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
         .push_str("    throw new ApiError(`HTTP request failed with status: ${result.status}`);\n");
     ts_content.push_str("  }\n\n");
     ts_content.push_str("  const jsonResponse = await result.json();\n");
-    ts_content.push_str("  return parseResultResponse<R>(jsonResponse);\n");
+    ts_content.push_str("  return parseResponse<R>(jsonResponse);\n");
     ts_content.push_str("}\n\n");
 
     // Collect types grouped by hyperapp
