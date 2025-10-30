@@ -413,7 +413,7 @@ match create_file("/data/test.txt", None) {
 
 ### ❌ "CapabilityNotFound"
 ```
-Error: Process skeleton-app:skeleton-app:user.os does not have capability vfs:distro:sys
+Error: Process hyperapp-skeleton:hyperapp-skeleton:user.os does not have capability vfs:distro:sys
 ```
 **Fix**: Add missing capability to manifest.json
 

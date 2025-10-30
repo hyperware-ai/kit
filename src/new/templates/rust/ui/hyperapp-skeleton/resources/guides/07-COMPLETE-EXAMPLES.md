@@ -150,7 +150,7 @@ impl TodoState {
             "ReceiveTodoUpdate": serde_json::to_string(&todo).unwrap()
         });
         
-        let process_id = "todo-app:todo-app:skeleton.os".parse::<ProcessId>().unwrap();
+        let process_id = "todo-app:todo-app:template.os".parse::<ProcessId>().unwrap();
         
         for node in &self.shared_with {
             let target = Address::new(node.clone(), process_id.clone());
@@ -163,7 +163,7 @@ impl TodoState {
     }
     
     async fn sync_todos_with_node(&self, node: String) -> Result<(), String> {
-        let process_id = "todo-app:todo-app:skeleton.os".parse::<ProcessId>()
+        let process_id = "todo-app:todo-app:template.os".parse::<ProcessId>()
             .map_err(|e| format!("Invalid process ID: {}", e))?;
         
         let target = Address::new(node, process_id);
@@ -464,7 +464,7 @@ impl NotepadState {
         let node: String = serde_json::from_str(&request_body)?;
         
         // Request current state from node
-        let process_id = "notepad:notepad:skeleton.os".parse::<ProcessId>()?;
+        let process_id = "notepad:notepad:template.os".parse::<ProcessId>()?;
         let target = Address::new(node.clone(), process_id);
         
         let wrapper = json!({ "RequestState": our().node });
@@ -550,7 +550,7 @@ impl NotepadState {
             "ReceiveOperation": serde_json::to_string(&op).unwrap()
         });
         
-        let process_id = "notepad:notepad:skeleton.os".parse::<ProcessId>().unwrap();
+        let process_id = "notepad:notepad:template.os".parse::<ProcessId>().unwrap();
         
         for node in &self.collaborators {
             if node != &op.author { // Don't send back to author
@@ -736,7 +736,7 @@ impl KVStore {
             "Replicate": serde_json::to_string(&entry).unwrap()
         });
         
-        let process_id = "kvstore:kvstore:skeleton.os".parse::<ProcessId>().unwrap();
+        let process_id = "kvstore:kvstore:template.os".parse::<ProcessId>().unwrap();
         
         for replica in &self.replicas {
             let target = Address::new(replica.clone(), process_id.clone());
@@ -754,7 +754,7 @@ impl KVStore {
             .cloned()
             .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string());
         
-        let process_id = "kvstore:kvstore:skeleton.os".parse::<ProcessId>()?;
+        let process_id = "kvstore:kvstore:template.os".parse::<ProcessId>()?;
         let target = Address::new(node.clone(), process_id);
         
         let wrapper = json!({ "Sync": last_sync });
@@ -863,7 +863,7 @@ async fn share_file(&mut self, request_body: String) -> Result<String, String> {
         }
         
         // Notify the node
-        let process_id = "fileshare:fileshare:skeleton.os".parse::<ProcessId>()?;
+        let process_id = "fileshare:fileshare:template.os".parse::<ProcessId>()?;
         let target = Address::new(req.node, process_id);
         
         let notification = json!({
@@ -927,7 +927,7 @@ async fn request_file(&self, file_id: String) -> Result<Vec<u8>, String> {
 cp -r hyperapp-skeleton myapp
 cd myapp
 # Update metadata.json with your app name
-# Modify skeleton-app to match your app name
+# Modify hyperapp-skeleton to match your app name
 ```
 
 ### 2. Common Modifications
@@ -935,7 +935,7 @@ cd myapp
 #### Change App Name
 1. Update `metadata.json`
 2. Update `Cargo.toml` (both workspace and app)
-3. Rename `skeleton-app` directory
+3. Rename `hyperapp-skeleton` directory
 4. Update imports and ProcessId strings
 
 #### Add Dependencies
@@ -1761,7 +1761,7 @@ impl ChatState {
     
     // Helper methods
     async fn send_to_node(&self, node: String, message: ChatMessage) -> Result<(), String> {
-        let publisher = "skeleton.os"; // Must match across all nodes!
+        let publisher = "template.os"; // Must match across all nodes!
         let process_id = format!("p2p-chat:p2p-chat:{}", publisher)
             .parse::<ProcessId>()
             .map_err(|e| format!("Invalid ProcessId: {}", e))?;
@@ -1779,7 +1779,7 @@ impl ChatState {
     }
     
     async fn notify_group_join(&self, node: String, group_id: String, name: String, participants: Vec<String>) -> Result<(), String> {
-        let publisher = "skeleton.os";
+        let publisher = "template.os";
         let process_id = format!("p2p-chat:p2p-chat:{}", publisher)
             .parse::<ProcessId>()?;
         

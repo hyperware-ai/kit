@@ -1,7 +1,7 @@
-// Main App component for Skeleton App
+// Main App component for Hyperapp Skeleton
 import { useEffect } from 'react';
 import './App.css';
-import { useSkeletonStore } from './store/skeleton';
+import { useHyperappSkeletonStore } from './store/hyperapp-skeleton';
 
 function App() {
   // Store state and actions
@@ -16,7 +16,7 @@ function App() {
     fetchStatus,
     incrementCounter,
     clearError,
-  } = useSkeletonStore();
+  } = useHyperappSkeletonStore();
 
 
   // Initialize on mount
@@ -40,7 +40,7 @@ function App() {
     <div className="app">
       {/* Header */}
       <header className="app-header">
-        <h1 className="app-title">🦴 Skeleton App</h1>
+        <h1 className="app-title">🦴 HyperappSkeleton App</h1>
         <div className="node-info">
           {isConnected ? (
             <>
@@ -122,7 +122,7 @@ function App() {
           <section className="section">
             <h2 className="section-title">How to Use This Skeleton</h2>
             <div style={{ textAlign: 'left', maxWidth: '600px', margin: '0 auto' }}>
-              <p>This skeleton app demonstrates:</p>
+              <p>This HyperappSkeleton app demonstrates:</p>
               <ul>
                 <li>Basic state management with a counter</li>
                 <li>HTTP communication between frontend and backend</li>

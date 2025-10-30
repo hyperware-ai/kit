@@ -1,7 +1,7 @@
 [
   {
-    "process_name": "skeleton-app",
-    "process_wasm_path": "/skeleton-app.wasm",
+    "process_name": "hyperapp-skeleton",
+    "process_wasm_path": "/hyperapp-skeleton.wasm",
     "on_exit": "Restart",
     "request_networking": false,
     "request_capabilities": [

@@ -684,14 +684,14 @@ async fn diagnose_p2p(&self, request_body: String) -> String {
     let mut diagnostics = vec![];
     
     // Check 1: ProcessId parsing
-    match "skeleton-app:skeleton-app:skeleton.os".parse::<ProcessId>() {
+    match "hyperapp-skeleton:hyperapp-skeleton:template.os".parse::<ProcessId>() {
         Ok(pid) => diagnostics.push(format!("✅ ProcessId valid: {:?}", pid)),
         Err(e) => diagnostics.push(format!("❌ ProcessId error: {}", e)),
     }
     
     // Check 2: Address construction
     if !target_node.is_empty() {
-        let pid = "skeleton-app:skeleton-app:skeleton.os".parse::<ProcessId>().ok();
+        let pid = "hyperapp-skeleton:hyperapp-skeleton:template.os".parse::<ProcessId>().ok();
         if let Some(pid) = pid {
             let addr = Address::new(target_node.clone(), pid);
             diagnostics.push(format!("✅ Address created: {:?}", addr));
