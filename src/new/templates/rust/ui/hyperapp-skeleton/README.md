@@ -5,6 +5,7 @@ This skeleton provides a starting point for building Hyperware applications with
 
 Example prompt (works well with Codex):
 
+```
 Use `kit new myappname --template hyperapp-skeleton --ui`, (replacing myappname with appropriate app name) to make a template in `/desired_folder`, which you will modify to build the following app:
 
 Insert your app spec here, e.g.:
@@ -13,6 +14,7 @@ A collaborative TODO list where items sync between nodes.
 
 Write a spec, and then implement it step by step. Use the README.md given in hyperapp-skeleton to find instructions on specific details.
 At the end, I should be able to run `kit bs —hyperapp` and manually test that the app works.
+```
 
 The rest of this document is aimed at *LLMs* not *humans*.
 
