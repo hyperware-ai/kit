@@ -21,10 +21,10 @@ use crate::KIT_CACHE;
 // First account on anvil
 const OWNER_ADDRESS: &str = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
 const DEFAULT_MAX_ATTEMPTS: u16 = 16;
-const DEFAULT_CONFIG_PATH: &str = "./Contracts.toml";
+const DEFAULT_CONFIG: &str = include_str!("./Contracts.toml");
 
 #[derive(Debug, Clone)]
-struct ContractAddresses {
+pub struct ContractAddresses {
     hypermap_proxy: String,
     hypermap_impl: String,
     hyperaccount: String,
@@ -262,6 +262,10 @@ fn load_config(config_path: &PathBuf) -> Result<Option<ChainConfig>> {
 
     info!("Loaded config from {:?}", config_path);
     Ok(Some(config))
+}
+
+fn load_default_config() -> Result<ChainConfig> {
+    toml::from_str(DEFAULT_CONFIG).map_err(|e| eyre!("Failed to parse default config: {}", e))
 }
 
 /// Load bytecode from JSON artifact
@@ -981,8 +985,9 @@ pub async fn start_chain(
     recv_kill: BroadcastRecvBool,
     verbose: bool,
     tracing: bool,
+    config_path: Option<PathBuf>,
 ) -> Result<Option<Child>> {
-    start_chain_with_config(port, recv_kill, verbose, tracing, None).await
+    start_chain_with_config(port, recv_kill, verbose, tracing, config_path).await
 }
 
 #[instrument(level = "trace", skip_all)]
@@ -1003,7 +1008,7 @@ pub async fn start_chain_with_config(
     )
     .await?;
 
-    let default_config = load_config(&PathBuf::from(DEFAULT_CONFIG_PATH))?;
+    let default_config = load_default_config().ok();
     let custom_config = if let Some(path) = custom_config_path {
         load_config(&path)?
     } else {
@@ -1013,12 +1018,7 @@ pub async fn start_chain_with_config(
     let active_config = custom_config
         .as_ref()
         .or(default_config.as_ref())
-        .ok_or_else(|| {
-            eyre!(
-                "No config file found. Please provide {} or specify a custom config path",
-                DEFAULT_CONFIG_PATH
-            )
-        })?;
+        .ok_or_else(|| eyre!("No config file found. Please specify a custom config path"))?;
 
     info!("Checking for Anvil on port {}...", port);
     if wait_for_anvil(port, 1, None).await.is_ok() {

@@ -193,6 +193,9 @@ async fn execute(
             let is_persist = matches.get_one::<bool>("PERSIST").unwrap();
             let release = matches.get_one::<bool>("RELEASE").unwrap();
             let verbosity = matches.get_one::<u8>("VERBOSITY").unwrap();
+            let config_path = matches
+                .get_one::<String>("CONFIG")
+                .map(|s| PathBuf::from(s));
             let args = matches
                 .get_one::<String>("ARGS")
                 .map(|s| s.split_whitespace().map(String::from).collect())
@@ -212,6 +215,7 @@ async fn execute(
                 *release,
                 *verbosity,
                 args,
+                config_path,
             )
             .await
         }
@@ -688,6 +692,12 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .help("Additional arguments to pass to the node (i.e. to Hyperdrive)")
                 .required(false)
             )
+            .arg(Arg::new("CONFIG")
+                .action(ArgAction::Set)
+                .long("config")
+                .help("Path to contracts config file (TOML format)")
+                .required(false)
+            )
         )
         .subcommand(Command::new("boot-real-node")
             .about("Boot a real node")
@@ -1035,7 +1045,6 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
             )
             .arg(Arg::new("CONFIG")
                 .action(ArgAction::Set)
-                .short('c')
                 .long("config")
                 .help("Path to contracts config file (TOML format)")
                 .required(false)
