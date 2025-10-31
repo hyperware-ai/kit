@@ -39,7 +39,7 @@ kit build --hyperapp
 hyperapp-skeleton/
 ├── Cargo.toml          # Workspace configuration
 ├── metadata.json       # App metadata
-├── skeleton-app/       # Main Rust process
+├── hyperapp-skeleton/       # Main Rust process
 │   ├── Cargo.toml      # Process dependencies
 │   └── src/
 │       ├── lib.rs      # Main app logic (well-commented)
@@ -127,7 +127,7 @@ Your app's state is automatically persisted based on the `save_config` option:
 
 ### 1. Modify App State
 
-Edit `AppState` in `skeleton-app/src/lib.rs`:
+Edit `AppState` in `hyperapp-skeleton/src/lib.rs`:
 ```rust
 #[derive(Default, Serialize, Deserialize)]
 pub struct AppState {
@@ -167,8 +167,8 @@ If sending messages between nodes, set:
 
 ### 4. Update Frontend
 
-1. Add types in `ui/src/types/skeleton.ts`
-2. Update store in `ui/src/store/skeleton.ts`
+1. Add types in `ui/src/types/hyperapp-skeleton.ts`
+2. Update store in `ui/src/store/hyperapp-skeleton.ts`
 3. Modify UI in `ui/src/App.tsx`
 
 ## Common Issues and Solutions
@@ -218,7 +218,7 @@ You create types that end up in the API by defining and using them in functions 
 
 Look carefully at `IMPLEMENTATION_PLAN.md` and in the `example-apps/` directory, if relevant.
 
-Work from the existing template that exists at `skeleton-app/` and `ui/`.
+Work from the existing template that exists at `hyperapp-skeleton/` and `ui/`.
 
 Note in particular that bindings for the UI will be generated when the app is built with `kit build --hyperapp`.
 As such, first design and implement the backend; the interface will be generated from the backend; finally design and implement the frontend to consume the interface.

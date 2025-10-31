@@ -1,10 +1,10 @@
-// Zustand store for Skeleton App state management
+// Zustand store for Hyperapp Skeleton state management
 import { create } from 'zustand';
-import type { SkeletonState } from '../types/skeleton';
+import type { HyperappSkeletonState } from '../types/hyperapp-skeleton';
 import { getNodeId } from '../types/global';
 import { App } from '#caller-utils';
 
-interface SkeletonStore extends SkeletonState {
+interface HyperappSkeletonStore extends HyperappSkeletonState {
   // Actions
   initialize: () => void;
   fetchStatus: () => Promise<void>;
@@ -15,7 +15,7 @@ interface SkeletonStore extends SkeletonState {
 }
 
 // Create the Zustand store
-export const useSkeletonStore = create<SkeletonStore>((set, get) => ({
+export const useHyperappSkeletonStore = create<HyperappSkeletonStore>((set, get) => ({
   // Initial state
   nodeId: null,
   isConnected: false,
@@ -97,9 +97,9 @@ function getErrorMessage(error: unknown): string {
 }
 
 // Selector hooks for common use cases
-export const useNodeId = () => useSkeletonStore((state) => state.nodeId);
-export const useIsConnected = () => useSkeletonStore((state) => state.isConnected);
-export const useCounter = () => useSkeletonStore((state) => state.counter);
-export const useMessages = () => useSkeletonStore((state) => state.messages);
-export const useIsLoading = () => useSkeletonStore((state) => state.isLoading);
-export const useError = () => useSkeletonStore((state) => state.error);
+export const useNodeId = () => useHyperappSkeletonStore((state) => state.nodeId);
+export const useIsConnected = () => useHyperappSkeletonStore((state) => state.isConnected);
+export const useCounter = () => useHyperappSkeletonStore((state) => state.counter);
+export const useMessages = () => useHyperappSkeletonStore((state) => state.messages);
+export const useIsLoading = () => useHyperappSkeletonStore((state) => state.isLoading);
+export const useError = () => useHyperappSkeletonStore((state) => state.error);
