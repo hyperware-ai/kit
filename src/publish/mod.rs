@@ -67,11 +67,11 @@ sol! {
     ) external payable returns (uint256 blockNumber, bytes[] memory returnData);
 }
 
-const FAKE_KIMAP_ADDRESS: &str = "0xEce71a05B36CA55B895427cD9a440eEF7Cf3669D";
-const REAL_KIMAP_ADDRESS: &str = "0x000000000044C6B8Cb4d8f0F889a3E47664EAeda";
+const FAKE_HYPERMAP_ADDRESS: &str = "0xEce71a05B36CA55B895427cD9a440eEF7Cf3669D";
+const REAL_HYPERMAP_ADDRESS: &str = "0x000000000044C6B8Cb4d8f0F889a3E47664EAeda";
 
-const FAKE_KINO_ACCOUNT_IMPL: &str = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
-const REAL_KINO_ACCOUNT_IMPL: &str = "0x0000000000691b70A051CFAF82F9622E150369f3";
+const FAKE_HYPER_ACCOUNT_IMPL: &str = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
+const REAL_HYPER_ACCOUNT_IMPL: &str = "0x0000000000691b70A051CFAF82F9622E150369f3";
 
 const REAL_CHAIN_ID: u64 = 8453;
 const FAKE_CHAIN_ID: u64 = 31337;
@@ -288,7 +288,7 @@ async fn prepare_hypermap_put(
     hypermap: Address,
     provider: &RootProvider<PubSubFrontend>,
     wallet_address: Address,
-    kino_account_impl: Address,
+    hyper_account_impl: Address,
 ) -> Result<(Address, Vec<u8>)> {
     // if app_tba exists, update existing state;
     // else mint it & add new state
@@ -304,7 +304,7 @@ async fn prepare_hypermap_put(
             who: wallet_address,
             label: name.into(),
             initialization: multicall.into(),
-            implementation: kino_account_impl,
+            implementation: hyper_account_impl,
         }
         .abi_encode();
         let call = executeCall {
@@ -335,15 +335,15 @@ pub async fn build_tx(
     max_fee_per_gas: Option<u128>,
 ) -> Result<(Address, Vec<u8>, TransactionRequest)> {
     let hypermap = Address::from_str(if *real {
-        REAL_KIMAP_ADDRESS
+        REAL_HYPERMAP_ADDRESS
     } else {
-        FAKE_KIMAP_ADDRESS
+        FAKE_HYPERMAP_ADDRESS
     })?;
     let multicall_address = Address::from_str(MULTICALL_ADDRESS)?;
-    let kino_account_impl = Address::from_str(if *real {
-        REAL_KINO_ACCOUNT_IMPL
+    let hyper_account_impl = Address::from_str(if *real {
+        REAL_HYPER_ACCOUNT_IMPL
     } else {
-        FAKE_KINO_ACCOUNT_IMPL
+        FAKE_HYPER_ACCOUNT_IMPL
     })?;
 
     let (to, call) = if *unpublish {
@@ -366,7 +366,7 @@ pub async fn build_tx(
             hypermap,
             &provider,
             wallet_address,
-            kino_account_impl,
+            hyper_account_impl,
         )
         .await?
     };

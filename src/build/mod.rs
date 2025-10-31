@@ -49,7 +49,7 @@ const HYPERWARE_WIT_1_0_0_URL: &str =
     "https://raw.githubusercontent.com/hyperware-ai/hyperware-wit/v1.0.0/hyperware.wit";
 const WASI_VERSION: &str = "33.0.0"; // TODO: un-hardcode
 const DEFAULT_WORLD_1_0_0: &str = "process-v1";
-const KINODE_PROCESS_LIB_CRATE_NAME: &str = "hyperware_process_lib";
+const HYPER_PROCESS_LIB_CRATE_NAME: &str = "hyperware_process_lib";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CargoFile {
@@ -538,11 +538,11 @@ fn check_process_lib_version(cargo_toml_path: &Path) -> Result<()> {
         .iter()
         .map(|package| (package.id.clone(), package))
         .collect();
-    let versions = find_crate_versions(KINODE_PROCESS_LIB_CRATE_NAME, &packages)?;
+    let versions = find_crate_versions(HYPER_PROCESS_LIB_CRATE_NAME, &packages)?;
     if versions.len() > 1 {
         return Err(eyre!(
             "Found different versions of {} in different crates:{}",
-            KINODE_PROCESS_LIB_CRATE_NAME,
+            HYPER_PROCESS_LIB_CRATE_NAME,
             versions.iter().fold(String::new(), |s, (version, crates)| {
                 format!("{s}\n{version}\t{crates:?}")
             })
@@ -550,7 +550,7 @@ fn check_process_lib_version(cargo_toml_path: &Path) -> Result<()> {
         .with_suggestion(|| {
             format!(
                 "Set all {} versions to be the same to avoid hard-to-debug errors.",
-                KINODE_PROCESS_LIB_CRATE_NAME,
+                HYPER_PROCESS_LIB_CRATE_NAME,
             )
         }));
     }
