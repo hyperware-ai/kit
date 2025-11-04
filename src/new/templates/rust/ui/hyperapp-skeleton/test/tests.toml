@@ -15,6 +15,7 @@ test_package_paths = ["hyperapp-skeleton-test"]
 test_scripts = []
 timeout_secs = 5
 fakechain_router = 8545
+hyperapp = true
 
 [[tests.nodes]]
 port = 8080
