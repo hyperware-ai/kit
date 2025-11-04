@@ -1,0 +1,16 @@
+[
+    {
+        "process_name": "hyperapp-skeleton-test",
+        "process_wasm_path": "/hyperapp-skeleton-test.wasm",
+        "on_exit": "Restart",
+        "request_networking": false,
+        "request_capabilities": [
+            "hyperapp-skeleton:hyperapp-skeleton:template.os"
+        ],
+        "grant_capabilities": [
+            "hyperapp-skeleton:hyperapp-skeleton:template.os",
+            "tester:tester:sys"
+        ],
+        "public": true
+    }
+]

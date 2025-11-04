@@ -12,7 +12,8 @@
     "grant_capabilities": [
       "homepage:homepage:sys",
       "http-server:distro:sys",
-      "vfs:distro:sys"
+      "vfs:distro:sys",
+      "tester:tester:sys"
     ],
     "public": false
   }

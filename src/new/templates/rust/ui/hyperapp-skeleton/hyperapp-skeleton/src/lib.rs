@@ -69,6 +69,7 @@ impl AppState {
     }
     
     // HTTP ENDPOINT EXAMPLE
+    #[local]
     #[http]
     async fn get_status(&self) -> Result<Status, String> {
         Ok(Status {
@@ -82,6 +83,7 @@ impl AppState {
     // Frontend sends parameters as either:
     // - Single value: { "MethodName": value }
     // - Multiple values as tuple: { "MethodName": [val1, val2] }
+    #[local]
     #[http]
     async fn increment_counter(&mut self, amount: u32) -> Result<u32, String> {
         self.counter += amount;
@@ -93,6 +95,7 @@ impl AppState {
     
     // HTTP ENDPOINT RETURNING COMPLEX DATA
     // For complex types, return as JSON string to avoid WIT limitations
+    #[local]
     #[http]
     async fn get_messages(&self) -> Result<Vec<String>, String> {
         Ok(self.messages.clone())
