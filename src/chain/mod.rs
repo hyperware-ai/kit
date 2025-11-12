@@ -10,7 +10,7 @@ use color_eyre::{
 use reqwest::Client;
 use serde::Deserialize;
 use tokio::time::{sleep, Duration};
-use tracing::{debug, info, error, instrument};
+use tracing::{debug, error, info, instrument};
 
 use crate::build;
 use crate::run_tests::cleanup::{clean_process_by_pid, cleanup_on_signal};
@@ -1046,7 +1046,8 @@ pub async fn start_chain_with_config(
     if wait_for_anvil(port, 1, None).await.is_ok() {
         if !check_code(port, DOT_OS_TBA).await? {
             let deployed_addresses = configs.process(port).await?;
-            let mut addresses = ContractAddresses::from_config(configs.active(), &deployed_addresses)?;
+            let mut addresses =
+                ContractAddresses::from_config(configs.active(), &deployed_addresses)?;
             mint_test_tbas(port, &mut addresses).await?;
             addresses.print_summary();
         }
@@ -1184,7 +1185,11 @@ pub async fn verify_contracts(port: u16, addresses: &ContractAddresses) -> Resul
     match call_contract(port, &addresses.hyperaccount, entry_calldata).await {
         Ok(result) => {
             let result_trimmed = result.trim_start_matches("0x000000000000000000000000");
-            if result == "0x" || result.is_empty() || result_trimmed == "0" || result_trimmed.len() < 40 {
+            if result == "0x"
+                || result.is_empty()
+                || result_trimmed == "0"
+                || result_trimmed.len() < 40
+            {
                 return Err(eyre!("HyperAccount entryPoint() returned zero address"));
             }
             info!("HyperAccount entryPoint: {}", result);
