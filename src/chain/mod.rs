@@ -10,7 +10,7 @@ use color_eyre::{
 use reqwest::Client;
 use serde::Deserialize;
 use tokio::time::{sleep, Duration};
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, error, instrument};
 
 use crate::build;
 use crate::run_tests::cleanup::{clean_process_by_pid, cleanup_on_signal};
@@ -20,6 +20,12 @@ use crate::KIT_CACHE;
 
 // First account on anvil
 const OWNER_ADDRESS: &str = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
+
+const DOT_OS_TBA: &str = "0x9b3853358ede717fc7D4806cF75d7A4d4517A9C9";
+
+//.os Token ID
+const DOT_OS_TOKEN_ID: &str = "0xdeeac81ae11b64e7cab86d089c306e5d223552a630f02633ce170d2786ff1bbd";
+
 const DEFAULT_MAX_ATTEMPTS: u16 = 16;
 const DEFAULT_CONFIG: &str = include_str!("./Contracts.toml");
 
@@ -235,6 +241,25 @@ impl ChainConfig {
             .iter()
             .find(|c| c.name.as_deref() == Some(name))
             .and_then(|c| c.address.clone())
+    }
+}
+
+struct ConfigSet<'a> {
+    default: &'a ChainConfig,
+    custom: Option<&'a ChainConfig>,
+}
+
+impl<'a> ConfigSet<'a> {
+    fn new(default: &'a ChainConfig, custom: Option<&'a ChainConfig>) -> Self {
+        Self { default, custom }
+    }
+
+    fn active(&self) -> &ChainConfig {
+        self.custom.unwrap_or(self.default)
+    }
+
+    async fn process(&self, port: u16) -> Result<HashMap<String, String>> {
+        process_configs(port, Some(self.default), self.custom).await
     }
 }
 
@@ -647,7 +672,7 @@ async fn deploy_contracts(
                     }
                 }
                 Err(e) => {
-                    info!("Failed to deploy contract '{}': {}", name, e);
+                    error!("Failed to deploy contract '{}': {}", name, e);
                 }
             }
 
@@ -718,11 +743,11 @@ async fn execute_config_transactions(
 }
 
 #[instrument(level = "trace", skip_all)]
-async fn mint_test_nfts(port: u16, addresses: &mut ContractAddresses) -> Result<()> {
-    info!("Minting test NFTs...");
+async fn mint_test_tbas(port: u16, addresses: &mut ContractAddresses) -> Result<()> {
+    info!("Minting test TBAs...");
 
     let Some(ref permissioned_minter) = addresses.hyper_permissioned_minter else {
-        info!("Skipping NFT minting: hyper_permissioned_minter not deployed");
+        info!("Skipping TBA minting: hyper_permissioned_minter not deployed");
         return Ok(());
     };
 
@@ -818,13 +843,11 @@ async fn mint_test_nfts(port: u16, addresses: &mut ContractAddresses) -> Result<
     .await
     {
         Ok(tx_hash) => {
-            info!("Mint NFT transaction sent: {}", tx_hash);
+            info!("Mint TBA transaction sent: {}", tx_hash);
 
             sleep(Duration::from_millis(200)).await;
 
-            // Calculate token ID from label (.os)
-            let token_id_hex = "0xdeeac81ae11b64e7cab86d089c306e5d223552a630f02633ce170d2786ff1bbd";
-            let tba_of_calldata = format!("0x27244d1e{}", &token_id_hex[2..]);
+            let tba_of_calldata = format!("0x27244d1e{}", &DOT_OS_TOKEN_ID[2..]);
 
             if let Ok(dot_os_tba_result) =
                 call_contract(port, &addresses.hypermap_proxy, &tba_of_calldata).await
@@ -839,11 +862,11 @@ async fn mint_test_nfts(port: u16, addresses: &mut ContractAddresses) -> Result<
             }
         }
         Err(e) => {
-            info!("Mint NFT transaction failed: {}", e);
+            error!("Mint TBA transaction failed: {}", e);
         }
     }
 
-    info!("Test NFTs minted successfully");
+    info!("Test TBAs minted successfully");
     Ok(())
 }
 
@@ -908,15 +931,14 @@ async fn apply_config_contracts(
 }
 
 #[instrument(level = "trace", skip_all)]
-async fn check_dot_os_tba(port: u16) -> Result<bool> {
-    let dot_os_tba = "0x9b3853358ede717fc7D4806cF75d7A4d4517A9C9";
+async fn check_code(port: u16, address: &str) -> Result<bool> {
     let client = Client::new();
 
     let response = rpc_call(
         port,
         &client,
         "eth_getCode",
-        serde_json::json!([dot_os_tba, "latest"]),
+        serde_json::json!([address, "latest"]),
     )
     .await?;
     let code = response["result"].as_str().unwrap_or("0x");
@@ -1008,25 +1030,24 @@ pub async fn start_chain_with_config(
     )
     .await?;
 
-    let default_config = load_default_config().ok();
+    // Default config should always load successfully (it's embedded)
+    let default_config = load_default_config()?;
+
+    // Custom config is optional
     let custom_config = if let Some(path) = custom_config_path {
         load_config(&path)?
     } else {
         None
     };
 
-    let active_config = custom_config
-        .as_ref()
-        .or(default_config.as_ref())
-        .ok_or_else(|| eyre!("No config file found. Please specify a custom config path"))?;
+    let configs = ConfigSet::new(&default_config, custom_config.as_ref());
 
     info!("Checking for Anvil on port {}...", port);
     if wait_for_anvil(port, 1, None).await.is_ok() {
-        if !check_dot_os_tba(port).await? {
-            let deployed_addresses =
-                process_configs(port, default_config.as_ref(), custom_config.as_ref()).await?;
-            let mut addresses = ContractAddresses::from_config(active_config, &deployed_addresses)?;
-            mint_test_nfts(port, &mut addresses).await?;
+        if !check_code(port, DOT_OS_TBA).await? {
+            let deployed_addresses = configs.process(port).await?;
+            let mut addresses = ContractAddresses::from_config(configs.active(), &deployed_addresses)?;
+            mint_test_tbas(port, &mut addresses).await?;
             addresses.print_summary();
         }
         return Ok(None);
@@ -1053,20 +1074,19 @@ pub async fn start_chain_with_config(
         return Err(e);
     }
 
-    let deployed_addresses =
-        match process_configs(port, default_config.as_ref(), custom_config.as_ref()).await {
-            Ok(addrs) => addrs,
-            Err(e) => {
-                let _ = child.kill();
-                return Err(e.wrap_err("Failed to process configs"));
-            }
-        };
+    let deployed_addresses = match configs.process(port).await {
+        Ok(addrs) => addrs,
+        Err(e) => {
+            let _ = child.kill();
+            return Err(e.wrap_err("Failed to process configs"));
+        }
+    };
 
-    let mut addresses = ContractAddresses::from_config(active_config, &deployed_addresses)?;
+    let mut addresses = ContractAddresses::from_config(configs.active(), &deployed_addresses)?;
 
-    if let Err(e) = mint_test_nfts(port, &mut addresses).await {
+    if let Err(e) = mint_test_tbas(port, &mut addresses).await {
         let _ = child.kill();
-        return Err(e.wrap_err("Failed to mint test NFTs"));
+        return Err(e.wrap_err("Failed to mint test TBAs"));
     }
 
     if let Err(e) = verify_contracts(port, &addresses).await {
@@ -1145,10 +1165,13 @@ pub async fn call_contract(port: u16, target: &str, data: &str) -> Result<String
 pub async fn verify_contracts(port: u16, addresses: &ContractAddresses) -> Result<()> {
     info!("Verifying deployed contracts...");
 
-    // cast calldata "symbol()"
+    // Verify Hypermap proxy - symbol()
     let symbol_calldata = "0x95d89b41";
     match call_contract(port, &addresses.hypermap_proxy, symbol_calldata).await {
         Ok(result) => {
+            if result == "0x" || result.is_empty() {
+                return Err(eyre!("Hypermap symbol() returned empty result"));
+            }
             info!("Hypermap symbol: {}", result);
         }
         Err(e) => {
@@ -1156,8 +1179,101 @@ pub async fn verify_contracts(port: u16, addresses: &ContractAddresses) -> Resul
         }
     }
 
+    // Verify HyperAccount - entryPoint()
+    let entry_calldata = "0xb0d691fe"; // entryPoint()
+    match call_contract(port, &addresses.hyperaccount, entry_calldata).await {
+        Ok(result) => {
+            let result_trimmed = result.trim_start_matches("0x000000000000000000000000");
+            if result == "0x" || result.is_empty() || result_trimmed == "0" || result_trimmed.len() < 40 {
+                return Err(eyre!("HyperAccount entryPoint() returned zero address"));
+            }
+            info!("HyperAccount entryPoint: {}", result);
+        }
+        Err(e) => {
+            return Err(e.wrap_err("Failed to verify HyperAccount contract"));
+        }
+    }
+
+    // Verify ERC6551 Registry - account(address,uint256,address,uint256,uint256)
+    // Using fake data: implementation=0x0, chainId=1, tokenContract=0x0, tokenId=1, salt=0
+    let account_calldata = "0x8a54c52f\
+        0000000000000000000000000000000000000000000000000000000000000000\
+        0000000000000000000000000000000000000000000000000000000000000001\
+        0000000000000000000000000000000000000000000000000000000000000000\
+        0000000000000000000000000000000000000000000000000000000000000001\
+        0000000000000000000000000000000000000000000000000000000000000000";
+    match call_contract(port, &addresses.erc6551registry, account_calldata).await {
+        Ok(result) => {
+            if result == "0x" || result.is_empty() {
+                return Err(eyre!("ERC6551Registry account() returned empty result"));
+            }
+            info!("ERC6551Registry account: {}", result);
+        }
+        Err(e) => {
+            return Err(e.wrap_err("Failed to verify ERC6551Registry contract"));
+        }
+    }
+
+    // Verify Multicall3 - getBasefee()
+    let basefee_calldata = "0x3e64a696";
+    match call_contract(port, &addresses.multicall, basefee_calldata).await {
+        Ok(result) => {
+            if result == "0x" || result.is_empty() {
+                return Err(eyre!("Multicall3 getBasefee() returned empty result"));
+            }
+            info!("Multicall3 basefee: {}", result);
+        }
+        Err(e) => {
+            return Err(e.wrap_err("Failed to verify Multicall3 contract"));
+        }
+    }
+
+    // Verify Create2 factory - just check code exists
+    match get_code(port, &addresses.create2).await {
+        Ok(code) => {
+            if code == "0x" || code.is_empty() {
+                return Err(eyre!("Create2 factory has no code deployed"));
+            }
+            info!("Create2 factory deployed (code length: {})", code.len());
+        }
+        Err(e) => {
+            return Err(e.wrap_err("Failed to verify Create2 factory"));
+        }
+    }
+
     info!("All contracts verified successfully");
     Ok(())
+}
+
+// Helper function to get contract code
+async fn get_code(port: u16, address: &str) -> Result<String> {
+    let client = reqwest::Client::new();
+    let rpc_url = format!("http://127.0.0.1:{}", port);
+
+    let payload = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_getCode",
+        "params": [address, "latest"],
+        "id": 1
+    });
+
+    let response = client
+        .post(&rpc_url)
+        .json(&payload)
+        .send()
+        .await?
+        .json::<serde_json::Value>()
+        .await?;
+
+    if let Some(error) = response.get("error") {
+        return Err(eyre!("RPC error: {}", error));
+    }
+
+    response
+        .get("result")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| eyre!("Invalid response format"))
 }
 
 #[instrument(level = "trace", skip_all)]

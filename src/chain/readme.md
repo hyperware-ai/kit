@@ -16,6 +16,8 @@ This tool provides a streamlined way to start a local Anvil chain with pre-confi
 
 * Custom contract configurations
 
+---
+
 ## Quick Start
 
 ### Start Chain with Default Configuration
@@ -41,6 +43,42 @@ kit chain --config path/to/Contracts.toml
 * `-t, --tracing` - Enable tracing/steps-tracing
 
 * `--config <PATH>` - Path to contracts config file (TOML format)
+
+---
+
+## Preparing Contract Artifacts (JSON files)
+
+Before running the chain, you need to have compiled JSON artifacts for all contracts referenced in your TOML configuration.
+
+### How to Get the JSON Files
+
+1. Navigate to your **protocol** project directory (where the Solidity contracts are located).
+
+2. Run the build command using **[Foundry](https://book.getfoundry.sh/)**:
+
+  ```bash
+  forge build
+  ```
+
+3. The resulting `.json` artifacts for each contract will be located in the `out/` directory.\
+  Example paths:
+
+  ```
+  ./out/MyContract.sol/MyContract.json
+  ./out/Proxy.sol/Proxy.json
+  ```
+
+4. Use these paths in your TOML configuration under `contract_json_path` or `deployed_bytecode_path`.
+
+Example TOML snippet:
+
+```toml
+[[contracts]]
+name = "my-contract"
+contract_json_path = "./out/MyContract.sol/MyContract.json"
+```
+
+---
 
 ## Configuration File Format
 
@@ -118,7 +156,9 @@ target = "0x..."
 data = "0x12345678..."
 ```
 
-### Reference System
+---
+
+## Reference System
 
 Use `#contract-name` to reference deployed contracts:
 
@@ -138,6 +178,8 @@ args = [
     { type = "address", value = "#erc6551registry" }
 ]
 ```
+
+---
 
 ## Supported Types
 
@@ -165,6 +207,8 @@ args = [
 
 * Number: `42`
 
+---
+
 ## Default Configuration
 
 The tool includes a default configuration (`Contracts.toml`) with:
@@ -181,6 +225,8 @@ The tool includes a default configuration (`Contracts.toml`) with:
 
 * HyperAccount Minters (standard, 9-char commit, permissioned)
 
+---
+
 ## Examples
 
 ### Minimal Setup
@@ -188,7 +234,7 @@ The tool includes a default configuration (`Contracts.toml`) with:
 ```toml
 [[contracts]]
 name = "my-token"
-contract_json_path = "./MyToken.json"
+contract_json_path = "./out/MyToken.sol/MyToken.json"
 constructor_args = [
     { type = "string", value = "MyToken" },
     { type = "string", value = "MTK" }
@@ -200,12 +246,12 @@ constructor_args = [
 ```toml
 [[contracts]]
 name = "implementation"
-contract_json_path = "./Implementation.json"
+contract_json_path = "./out/Implementation.sol/Implementation.json"
 
 [[contracts]]
 name = "proxy"
 address = "0x..."
-deployed_bytecode_path = "./Proxy.json"
+deployed_bytecode_path = "./out/Proxy.sol/Proxy.json"
 
 [contracts.storage]
 # ERC1967 implementation slot
@@ -226,11 +272,11 @@ args = [
 ```toml
 [[contracts]]
 name = "token"
-contract_json_path = "./Token.json"
+contract_json_path = "./out/Token.sol/Token.json"
 
 [[contracts]]
 name = "staking"
-contract_json_path = "./Staking.json"
+contract_json_path = "./out/Staking.sol/Staking.json"
 constructor_args = [
     { type = "address", value = "#token" }
 ]
@@ -244,6 +290,8 @@ args = [
     { type = "uint256", value = "1000000000000000000000" }
 ]
 ```
+
+---
 
 ## Features
 
@@ -267,7 +315,7 @@ If Anvil is already running on the specified port, the tool will:
 
 2. Skip deployment if found
 
-3. Deploy missing contracts if needed
+---
 
 ## Troubleshooting
 
@@ -280,7 +328,9 @@ kit chain --port 8546
 
 ### Contract Deployment Failed
 
-* Check that JSON artifacts exist at specified paths
+* Check that JSON artifacts exist at specified paths (e.g. `./out/.../Contract.json`)
+
+* Run `forge build` again if artifacts are missing
 
 * Verify constructor arguments match contract requirements
 
@@ -293,6 +343,8 @@ kit chain --port 8546
 * Use `0x` prefix for hex values
 
 * References must point to existing contracts
+
+---
 
 ## Integration with Kit
 
@@ -308,6 +360,8 @@ kit boot-fake-node --fakechain-port 8545
 # Build and deploy package
 kit build-start-package
 ```
+
+---
 
 ## Advanced Usage
 
