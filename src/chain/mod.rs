@@ -26,8 +26,28 @@ const DOT_OS_TBA: &str = "0x9b3853358ede717fc7D4806cF75d7A4d4517A9C9";
 //.os Token ID
 const DOT_OS_TOKEN_ID: &str = "0xdeeac81ae11b64e7cab86d089c306e5d223552a630f02633ce170d2786ff1bbd";
 
+const DOT_OS_LABAL_HEX: &str = "0x6f73"; // "os" label (2 bytes)
+
+const TBA_OF_SELECTOR: &str = "0x27244d1e";
+
 const DEFAULT_MAX_ATTEMPTS: u16 = 16;
+
 const DEFAULT_CONFIG: &str = include_str!("./Contracts.toml");
+
+// Verify Hypermap proxy - symbol()
+const SYMBOL_CALLDATA: &str = "0x95d89b41";
+
+// Verify ERC6551 Registry - account(address,uint256,address,uint256,uint256)
+// Using fake data: implementation=0x0, chainId=1, tokenContract=0x0, tokenId=1, salt=0
+const VERIFY_REGISTRY_CALLDATA: &str = "0x8a54c52f\
+    0000000000000000000000000000000000000000000000000000000000000000\
+    0000000000000000000000000000000000000000000000000000000000000001\
+    0000000000000000000000000000000000000000000000000000000000000000\
+    0000000000000000000000000000000000000000000000000000000000000001\
+    0000000000000000000000000000000000000000000000000000000000000000";
+
+// Verify Multicall3 - getBasefee()
+const VERIFY_MULTICALL_CALLDATA: &str = "0x3e64a696";
 
 #[derive(Debug, Clone)]
 pub struct ContractAddresses {
@@ -751,11 +771,12 @@ async fn mint_test_tbas(port: u16, addresses: &mut ContractAddresses) -> Result<
         return Ok(());
     };
 
-    // Call tbaOf(0) to get zeroth_tba address
-    let tba_of_zero_calldata =
-        "0x27244d1e0000000000000000000000000000000000000000000000000000000000000000";
+    let tba_of_calldata = format!(
+        "{}{}",
+        TBA_OF_SELECTOR, "0000000000000000000000000000000000000000000000000000000000000000"
+    );
     let zeroth_tba_result =
-        call_contract(port, &addresses.hypermap_proxy, tba_of_zero_calldata).await?;
+        call_contract(port, &addresses.hypermap_proxy, &tba_of_calldata).await?;
     info!("zeroth_tba_result: {}", zeroth_tba_result);
 
     // Extract address from result (last 20 bytes / 40 hex chars)
@@ -773,8 +794,6 @@ async fn mint_test_tbas(port: u16, addresses: &mut ContractAddresses) -> Result<
     let nonce = get_nonce(port, &client, OWNER_ADDRESS).await?;
 
     // Build mint calldata: mint(address to, bytes label, bytes initialization, address implementation)
-    let label_hex = "0x6f73"; // "os" label (2 bytes)
-
     let mint_args = vec![
         ConstructorArg {
             arg_type: "address".to_string(),
@@ -782,7 +801,7 @@ async fn mint_test_tbas(port: u16, addresses: &mut ContractAddresses) -> Result<
         },
         ConstructorArg {
             arg_type: "bytes".to_string(),
-            value: label_hex.to_string(),
+            value: DOT_OS_LABAL_HEX.to_string(),
         },
         ConstructorArg {
             arg_type: "bytes".to_string(),
@@ -847,7 +866,7 @@ async fn mint_test_tbas(port: u16, addresses: &mut ContractAddresses) -> Result<
 
             sleep(Duration::from_millis(200)).await;
 
-            let tba_of_calldata = format!("0x27244d1e{}", &DOT_OS_TOKEN_ID[2..]);
+            let tba_of_calldata = format!("{}{}", TBA_OF_SELECTOR, &DOT_OS_TOKEN_ID[2..]);
 
             if let Ok(dot_os_tba_result) =
                 call_contract(port, &addresses.hypermap_proxy, &tba_of_calldata).await
@@ -1166,9 +1185,7 @@ pub async fn call_contract(port: u16, target: &str, data: &str) -> Result<String
 pub async fn verify_contracts(port: u16, addresses: &ContractAddresses) -> Result<()> {
     info!("Verifying deployed contracts...");
 
-    // Verify Hypermap proxy - symbol()
-    let symbol_calldata = "0x95d89b41";
-    match call_contract(port, &addresses.hypermap_proxy, symbol_calldata).await {
+    match call_contract(port, &addresses.hypermap_proxy, SYMBOL_CALLDATA).await {
         Ok(result) => {
             if result == "0x" || result.is_empty() {
                 return Err(eyre!("Hypermap symbol() returned empty result"));
@@ -1199,15 +1216,7 @@ pub async fn verify_contracts(port: u16, addresses: &ContractAddresses) -> Resul
         }
     }
 
-    // Verify ERC6551 Registry - account(address,uint256,address,uint256,uint256)
-    // Using fake data: implementation=0x0, chainId=1, tokenContract=0x0, tokenId=1, salt=0
-    let account_calldata = "0x8a54c52f\
-        0000000000000000000000000000000000000000000000000000000000000000\
-        0000000000000000000000000000000000000000000000000000000000000001\
-        0000000000000000000000000000000000000000000000000000000000000000\
-        0000000000000000000000000000000000000000000000000000000000000001\
-        0000000000000000000000000000000000000000000000000000000000000000";
-    match call_contract(port, &addresses.erc6551registry, account_calldata).await {
+    match call_contract(port, &addresses.erc6551registry, VERIFY_REGISTRY_CALLDATA).await {
         Ok(result) => {
             if result == "0x" || result.is_empty() {
                 return Err(eyre!("ERC6551Registry account() returned empty result"));
@@ -1219,9 +1228,7 @@ pub async fn verify_contracts(port: u16, addresses: &ContractAddresses) -> Resul
         }
     }
 
-    // Verify Multicall3 - getBasefee()
-    let basefee_calldata = "0x3e64a696";
-    match call_contract(port, &addresses.multicall, basefee_calldata).await {
+    match call_contract(port, &addresses.multicall, VERIFY_MULTICALL_CALLDATA).await {
         Ok(result) => {
             if result == "0x" || result.is_empty() {
                 return Err(eyre!("Multicall3 getBasefee() returned empty result"));
