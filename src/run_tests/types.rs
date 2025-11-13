@@ -33,6 +33,7 @@ pub struct Test {
     pub fakechain_router: u16,
     pub nodes: Vec<Node>,
     pub hyperapp: Option<bool>,
+    pub features: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
