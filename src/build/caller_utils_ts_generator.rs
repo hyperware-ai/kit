@@ -231,6 +231,8 @@ struct SignatureStruct {
     function_name: String,
     attr_type: String,
     fields: Vec<SignatureField>,
+    http_method: Option<String>,
+    http_path: Option<String>,
 }
 
 // Structure to represent a WIT record
@@ -324,6 +326,37 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                 let attr_type = parts[1].to_string();
                 debug!(function = %function_name, attr_type = %attr_type, "Extracted function name and type");
 
+                let mut http_method = None;
+                let mut http_path = None;
+
+                // scan backward/upward to get method/path from a // HTTP: comment
+                if attr_type == "http" {
+                    let mut j = i;
+                    while j > 0 {
+                        let prev_line = lines[j - 1].trim();
+                        if prev_line.is_empty() {
+                            j -= 1;
+                            continue;
+                        }
+                        if prev_line.starts_with("// HTTP:") {
+                            let rest = prev_line.trim_start_matches("// HTTP:").trim();
+                            let tokens: Vec<&str> = rest.split_whitespace().collect();
+                            if let Some(method_token) = tokens.first() {
+                                http_method = Some(method_token.to_uppercase());
+                            }
+                            if let Some(path_token) = tokens.get(1) {
+                                http_path = Some(path_token.to_string());
+                            }
+                            break;
+                        } else if prev_line.starts_with("//") {
+                            j -= 1;
+                            continue;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
                 // Parse fields
                 let mut fields = Vec::new();
                 i += 1;
@@ -357,6 +390,8 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                     function_name,
                     attr_type,
                     fields,
+                    http_method,
+                    http_path,
                 });
             } else {
                 // This is a regular record
@@ -636,6 +671,16 @@ fn generate_typescript_function(
     let mut param_types = Vec::new();
     let mut full_return_type = "void".to_string();
     let mut unwrapped_return_type = "void".to_string();
+
+    let http_method = signature
+        .http_method
+        .clone()
+        .unwrap_or_else(|| "POST".to_string());
+    let http_path = signature
+        .http_path
+        .clone()
+        .unwrap_or_else(|| "/api".to_string());
+
     let actual_param_type: String;
 
     for field in &signature.fields {
@@ -708,7 +753,7 @@ fn generate_typescript_function(
 
     // Function returns the unwrapped type since parseResponse extracts it
     let function_impl = format!(
-        "/**\n * {}\n{} * @returns Promise with result\n * @throws ApiError if the request fails\n */\nexport async function {}({}): Promise<{}> {{\n{}\n\n  return await apiRequest<{}, {}>('{}', 'POST', data);\n}}",
+        "/**\n * {}\n{} * @returns Promise with result\n * @throws ApiError if the request fails\n */\nexport async function {}({}): Promise<{}> {{\n{}\n\n  return await apiRequest<{}, {}>('{}', '{}', data);\n}}",
         camel_function_name,
         params.iter().map(|p| format!(" * @param {}", p)).collect::<Vec<_>>().join("\n"),
         camel_function_name,
@@ -717,7 +762,8 @@ fn generate_typescript_function(
         data_construction,
         request_interface_name,
         unwrapped_return_type,  // Pass unwrapped type to apiRequest, not Response type
-        camel_function_name
+        http_path,
+        http_method
     );
 
     // Only return implementations for HTTP endpoints
@@ -807,13 +853,15 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
 
     ts_content.push_str("/**\n");
     ts_content.push_str(" * Generic API request function\n");
-    ts_content.push_str(" * @param endpoint - API endpoint\n");
+    ts_content.push_str(" * @param path - API endpoint path\n");
     ts_content.push_str(" * @param method - HTTP method (GET, POST, PUT, DELETE, etc.)\n");
     ts_content.push_str(" * @param data - Request data\n");
     ts_content.push_str(" * @returns Promise with parsed response data\n");
     ts_content.push_str(" * @throws ApiError if the request fails or response contains an error\n");
     ts_content.push_str(" */\n");
-    ts_content.push_str("async function apiRequest<T, R>(endpoint: string, method: string, data: T): Promise<R> {\n");
+    ts_content.push_str(
+        "async function apiRequest<T, R>(path: string, method: string, data: T): Promise<R> {\n",
+    );
     ts_content
         .push_str("  const BASE_URL = import.meta.env.BASE_URL || window.location.origin;\n\n");
     ts_content.push_str("  const requestOptions: RequestInit = {\n");
@@ -826,7 +874,10 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
     ts_content.push_str("  if (method !== 'GET' && method !== 'HEAD') {\n");
     ts_content.push_str("    requestOptions.body = JSON.stringify(data);\n");
     ts_content.push_str("  }\n\n");
-    ts_content.push_str("  const result = await fetch(`${BASE_URL}/api`, requestOptions);\n\n");
+    ts_content.push_str(
+        "  const url = path.startsWith('/') ? `${BASE_URL}${path}` : `${BASE_URL}/${path}`;\n",
+    );
+    ts_content.push_str("  const result = await fetch(url, requestOptions);\n\n");
     ts_content.push_str("  if (!result.ok) {\n");
     ts_content
         .push_str("    throw new ApiError(`HTTP request failed with status: ${result.status}`);\n");

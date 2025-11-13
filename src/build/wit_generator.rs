@@ -7,7 +7,12 @@ use color_eyre::{
     eyre::{bail, eyre, WrapErr},
     Result,
 };
-use syn::{self, Attribute, ImplItem, Item, Type};
+use syn::{
+    self,
+    parse::{Parse, ParseStream},
+    punctuated::Punctuated,
+    Attribute, Ident, ImplItem, Item, LitStr, Token, Type,
+};
 use toml::Value;
 use tracing::{debug, info, instrument, warn};
 use walkdir::WalkDir;
@@ -465,10 +470,17 @@ fn generate_signature_struct(
 
     // For HTTP endpoints, try to extract method and path from attribute
     if attr_type == "http" {
-        if let Some((http_method, http_path)) = extract_http_info(&method.attrs)? {
-            comment.push_str(&format!("\n    // HTTP: {} {}", http_method, http_path));
+        if let Some(info) = extract_http_info(&method.attrs)? {
+            let method_comment = info.method.unwrap_or_else(|| "POST".to_string());
+            let mut path_comment = info.path.unwrap_or_else(|| format!("/api/{}", kebab_name));
+            if !path_comment.starts_with('/') {
+                path_comment = format!("/{}", path_comment.trim_start_matches('/'));
+            }
+            comment.push_str(&format!(
+                "\n    // HTTP: {} {}",
+                method_comment, path_comment
+            ));
         } else {
-            // Default path if not specified
             comment.push_str(&format!("\n    // HTTP: POST /api/{}", kebab_name));
         }
     }
@@ -574,52 +586,67 @@ fn generate_signature_struct(
     Ok(record_def)
 }
 
+#[derive(Default, Debug, Clone)]
+struct HttpAttrInfo {
+    method: Option<String>,
+    path: Option<String>,
+}
+
+struct HttpKeyValue {
+    key: Ident,
+    _eq_token: Token![=],
+    value: LitStr,
+}
+
+impl Parse for HttpKeyValue {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        Ok(Self {
+            key: input.parse()?,
+            _eq_token: input.parse()?,
+            value: input.parse()?,
+        })
+    }
+}
+
 // Helper function to extract HTTP method and path from [http] attribute
 #[instrument(level = "trace", skip_all)]
-fn extract_http_info(attrs: &[Attribute]) -> Result<Option<(String, String)>> {
+fn extract_http_info(attrs: &[Attribute]) -> Result<Option<HttpAttrInfo>> {
     for attr in attrs {
         if attr.path().is_ident("http") {
-            // Convert attribute to string representation for parsing
-            let attr_str = format!("{:?}", attr);
-            debug!(attr_str = %attr_str, "HTTP attribute string");
+            match &attr.meta {
+                syn::Meta::Path(_) => {
+                    return Ok(Some(HttpAttrInfo::default()));
+                }
+                syn::Meta::List(list) => {
+                    let parser = Punctuated::<HttpKeyValue, Token![,]>::parse_terminated;
+                    let parsed = list.parse_args_with(parser);
 
-            let mut method = None;
-            let mut path = None;
-
-            // Look for method parameter
-            if let Some(method_pos) = attr_str.find("method") {
-                if let Some(eq_pos) = attr_str[method_pos..].find('=') {
-                    let start_pos = method_pos + eq_pos + 1;
-                    // Find the quoted value
-                    if let Some(quote_start) = attr_str[start_pos..].find('"') {
-                        let value_start = start_pos + quote_start + 1;
-                        if let Some(quote_end) = attr_str[value_start..].find('"') {
-                            method =
-                                Some(attr_str[value_start..value_start + quote_end].to_string());
+                    match parsed {
+                        Ok(args) => {
+                            let mut info = HttpAttrInfo::default();
+                            for kv in args {
+                                let key = kv.key.to_string();
+                                let value = kv.value.value();
+                                match key.as_str() {
+                                    "method" => info.method = Some(value.to_uppercase()),
+                                    "path" => info.path = Some(value),
+                                    other => {
+                                        warn!(key = %other, "Unknown parameter in #[http] attribute")
+                                    }
+                                }
+                            }
+                            return Ok(Some(info));
+                        }
+                        Err(err) => {
+                            return Err(err)
+                                .wrap_err("Failed to parse #[http] attribute arguments");
                         }
                     }
                 }
-            }
-
-            // Look for path parameter
-            if let Some(path_pos) = attr_str.find("path") {
-                if let Some(eq_pos) = attr_str[path_pos..].find('=') {
-                    let start_pos = path_pos + eq_pos + 1;
-                    // Find the quoted value
-                    if let Some(quote_start) = attr_str[start_pos..].find('"') {
-                        let value_start = start_pos + quote_start + 1;
-                        if let Some(quote_end) = attr_str[value_start..].find('"') {
-                            path = Some(attr_str[value_start..value_start + quote_end].to_string());
-                        }
-                    }
+                syn::Meta::NameValue(_) => {
+                    warn!("Unexpected name-value form for #[http] attribute");
+                    return Ok(Some(HttpAttrInfo::default()));
                 }
-            }
-
-            // If we found at least one parameter, return the info
-            if method.is_some() || path.is_some() {
-                let final_method = method.unwrap_or_else(|| "POST".to_string());
-                let final_path = path.unwrap_or_else(|| "/api".to_string());
-                return Ok(Some((final_method, final_path)));
             }
         }
     }
