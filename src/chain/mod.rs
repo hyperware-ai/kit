@@ -21,7 +21,7 @@ use crate::KIT_CACHE;
 // First account on anvil
 const OWNER_ADDRESS: &str = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
 
-const DOT_OS_TBA: &str = "0x9b3853358ede717fc7D4806cF75d7A4d4517A9C9";
+const HYPERMAP: &str = "0x000000000044C6B8Cb4d8f0F889a3E47664EAeda";
 
 //.os Token ID
 const DOT_OS_TOKEN_ID: &str = "0xdeeac81ae11b64e7cab86d089c306e5d223552a630f02633ce170d2786ff1bbd";
@@ -654,6 +654,32 @@ async fn deploy_contracts(
         if let Some(json_path) = &contract.contract_json_path {
             let name = contract.name.as_deref().unwrap_or("unnamed");
 
+            // Check if contract has predefined address and code already exists
+            if let Some(address) = &contract.address {
+                match check_code(port, address).await {
+                    Ok(true) => {
+                        info!(
+                            "Skipping deploy for '{}': code already present at {}",
+                            name, address
+                        );
+                        // Ensure address is registered
+                        if let Some(name) = &contract.name {
+                            deployed_addresses.insert(name.clone(), address.clone());
+                        }
+                        continue;
+                    }
+                    Ok(false) => {
+                        info!(
+                            "Contract '{}' has predefined address {} but no code yet, proceeding with deploy",
+                            name, address
+                        );
+                    }
+                    Err(e) => {
+                        debug!("Failed to check code for '{}' at {}: {}", name, address, e);
+                    }
+                }
+            }
+
             let mut bytecode = load_creation_bytecode(json_path)?;
 
             // Append constructor args if any
@@ -690,13 +716,16 @@ async fn deploy_contracts(
                             break;
                         }
                     }
+                    
+                    // Increment nonce only after successful deployment
+                    nonce += 1;
                 }
                 Err(e) => {
                     error!("Failed to deploy contract '{}': {}", name, e);
+                    // Still increment nonce as transaction was attempted
+                    nonce += 1;
                 }
             }
-
-            nonce += 1;
         }
     }
 
@@ -917,16 +946,31 @@ async fn apply_config_contracts(
         };
 
         if let Some(bytecode) = bytecode {
-            rpc_call(
-                port,
-                &client,
-                "anvil_setCode",
-                serde_json::json!([address, bytecode.trim()]),
-            )
-            .await?;
+            // Check if code already exists before overwriting
+            match check_code(port, address).await {
+                Ok(true) => {
+                    let name_info = contract.name.as_deref().unwrap_or("unnamed");
+                    info!(
+                        "Skipping setCode for '{}' at {}: code already present",
+                        name_info, address
+                    );
+                }
+                Ok(false) => {
+                    rpc_call(
+                        port,
+                        &client,
+                        "anvil_setCode",
+                        serde_json::json!([address, bytecode.trim()]),
+                    )
+                    .await?;
 
-            let name_info = contract.name.as_deref().unwrap_or("unnamed");
-            info!("Set bytecode for contract '{}' at {}", name_info, address);
+                    let name_info = contract.name.as_deref().unwrap_or("unnamed");
+                    info!("Set bytecode for contract '{}' at {}", name_info, address);
+                }
+                Err(e) => {
+                    debug!("Failed to check code at {}: {}", address, e);
+                }
+            }
         }
 
         // Apply storage with reference resolution
@@ -1063,7 +1107,7 @@ pub async fn start_chain_with_config(
 
     info!("Checking for Anvil on port {}...", port);
     if wait_for_anvil(port, 1, None).await.is_ok() {
-        if !check_code(port, DOT_OS_TBA).await? {
+        if !check_code(port, HYPERMAP).await? {
             let deployed_addresses = configs.process(port).await?;
             let mut addresses =
                 ContractAddresses::from_config(configs.active(), &deployed_addresses)?;
@@ -1311,11 +1355,11 @@ pub async fn execute(
     )
     .await?;
 
+    // If child is None, it means we connected to an existing Anvil instance
+    // In this case, we don't need to manage the process lifecycle
     let Some(mut child) = child else {
-        return Err(eyre!(
-            "Port {} is already in use by another anvil process",
-            port
-        ));
+        info!("Connected to existing Anvil instance on port {}, initialization complete", port);
+        return Ok(());
     };
 
     let child_id = child.id() as i32;
