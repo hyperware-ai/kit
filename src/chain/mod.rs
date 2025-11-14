@@ -716,7 +716,7 @@ async fn deploy_contracts(
                             break;
                         }
                     }
-                    
+
                     // Increment nonce only after successful deployment
                     nonce += 1;
                 }
@@ -1358,7 +1358,10 @@ pub async fn execute(
     // If child is None, it means we connected to an existing Anvil instance
     // In this case, we don't need to manage the process lifecycle
     let Some(mut child) = child else {
-        info!("Connected to existing Anvil instance on port {}, initialization complete", port);
+        info!(
+            "Connected to existing Anvil instance on port {}, initialization complete",
+            port
+        );
         return Ok(());
     };
 
