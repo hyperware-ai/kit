@@ -269,6 +269,7 @@ struct WitTypes {
     records: Vec<WitRecord>,
     variants: Vec<WitVariant>,
     enums: Vec<WitEnum>,
+    aliases: Vec<(String, String)>,
 }
 
 // Structure to hold types grouped by hyperapp
@@ -278,6 +279,7 @@ struct HyperappTypes {
     records: Vec<WitRecord>,
     variants: Vec<WitVariant>,
     enums: Vec<WitEnum>,
+    aliases: Vec<(String, String)>,
 }
 
 // Parse WIT file to extract function signatures, records, and variants
@@ -292,6 +294,7 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
     let mut records = Vec::new();
     let mut variants = Vec::new();
     let mut enums = Vec::new();
+    let mut aliases = Vec::new();
 
     // Simple parser for WIT files to extract record definitions
     let lines: Vec<_> = content.lines().collect();
@@ -300,8 +303,22 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
     while i < lines.len() {
         let line = lines[i].trim();
 
+        // Look for type aliases
+        if line.starts_with("type ") {
+            // Expect: type name = rhs
+            let rest = line
+                .trim_start_matches("type ")
+                .trim_end_matches(';')
+                .trim();
+            if let Some(eq_pos) = rest.find('=') {
+                let name = strip_wit_escape(rest[..eq_pos].trim()).to_string();
+                let rhs = rest[eq_pos + 1..].trim().to_string();
+                debug!(alias = %name, rhs = %rhs, "Found alias");
+                aliases.push((name, rhs));
+            }
+        }
         // Look for record definitions
-        if line.starts_with("record ") {
+        else if line.starts_with("record ") {
             let record_name = line
                 .trim_start_matches("record ")
                 .trim_end_matches(" {")
@@ -537,6 +554,7 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
         records,
         variants,
         enums,
+        aliases,
     })
 }
 
@@ -898,6 +916,7 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
             records: Vec::new(),
             variants: Vec::new(),
             enums: Vec::new(),
+            aliases: Vec::new(),
         };
 
         // Parse each WIT file for this hyperapp
@@ -976,6 +995,7 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
 
                     // Collect all types for this hyperapp
                     hyperapp_data.records.extend(wit_types.records);
+                    hyperapp_data.aliases.extend(wit_types.aliases);
                     hyperapp_data.variants.extend(wit_types.variants);
                     hyperapp_data.enums.extend(wit_types.enums);
 
@@ -997,6 +1017,7 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
             || !hyperapp_data.records.is_empty()
             || !hyperapp_data.variants.is_empty()
             || !hyperapp_data.enums.is_empty()
+            || !hyperapp_data.aliases.is_empty()
         {
             hyperapp_types_map.insert(hyperapp_name.clone(), hyperapp_data);
         }
@@ -1020,12 +1041,117 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
         ));
         ts_content.push_str(&format!("export namespace {} {{\n", hyperapp_name));
 
-        // Add custom types (records, variants, and enums) for this hyperapp
-        if !hyperapp_data.records.is_empty()
+        // Emit fallback primitive aliases when WIT omitted them but usage exists.
+        // We scan all known types to discover referenced custom aliases.
+        let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // Helper to extract rough tokens from a WIT type string
+        let mut collect_tokens = |ty: &str| {
+            let mut cur = String::new();
+            for ch in ty.chars() {
+                if ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' {
+                    cur.push(ch);
+                } else {
+                    if !cur.is_empty() {
+                        referenced.insert(cur.clone());
+                        cur.clear();
+                    }
+                }
+            }
+            if !cur.is_empty() {
+                referenced.insert(cur);
+            }
+        };
+        for rec in &hyperapp_data.records {
+            for f in &rec.fields {
+                collect_tokens(&f.wit_type);
+            }
+        }
+        for sig in &hyperapp_data.signatures {
+            for f in &sig.fields {
+                collect_tokens(&f.wit_type);
+            }
+        }
+        for var in &hyperapp_data.variants {
+            for case in &var.cases {
+                if let Some(ref dt) = case.data_type {
+                    collect_tokens(dt);
+                }
+            }
+        }
+
+        // Remove built-ins and generics
+        let builtins = [
+            "s8", "u8", "s16", "u16", "s32", "u32", "s64", "u64", "f32", "f64", "bool", "char",
+            "string", "address", "list", "option", "result", "tuple", "_",
+        ];
+        for b in builtins.iter() {
+            referenced.remove(*b);
+        }
+
+        // Anything already provided via explicit aliases should not be duplicated
+        let provided_aliases: std::collections::HashSet<String> = hyperapp_data
+            .aliases
+            .iter()
+            .map(|(n, _)| n.clone())
+            .collect();
+
+        // Compute fallback aliases
+        let mut fallback_aliases: Vec<(String, String)> = Vec::new();
+        for name in referenced {
+            if provided_aliases.contains(&name) {
+                continue;
+            }
+            if name.ends_with("-id") {
+                // Treat all *-id as string identifiers in TS
+                fallback_aliases.push((name.clone(), "string".to_string()));
+                continue;
+            }
+            match name.as_str() {
+                // Common collections that sometimes leak from WIT without a concrete alias
+                "hash-map" => fallback_aliases.push((name.clone(), "record".to_string())),
+                "hash-set" => fallback_aliases.push((name.clone(), "string[]".to_string())),
+                // serde_json::Value equivalent
+                "value" => fallback_aliases.push((name.clone(), "unknown".to_string())),
+                _ => {}
+            }
+        }
+
+        // Add custom types (aliases, records, variants, and enums) for this hyperapp
+        if !hyperapp_data.aliases.is_empty()
+            || !hyperapp_data.records.is_empty()
             || !hyperapp_data.variants.is_empty()
             || !hyperapp_data.enums.is_empty()
         {
+            // First, emit primitive/fallback aliases if any
+            if !fallback_aliases.is_empty() {
+                ts_content.push_str("\n  // Primitive type aliases used by this hyperapp (generated from WIT usage)\n");
+                for (alias_name, rhs) in &fallback_aliases {
+                    let ts_alias = to_pascal_case(alias_name);
+                    let rhs_ts = match rhs.as_str() {
+                        "record" => "Record<string, unknown>".to_string(),
+                        other => other.to_string(),
+                    };
+                    ts_content.push_str(&format!("  export type {} = {}\n", ts_alias, rhs_ts));
+                }
+                ts_content.push_str("\n");
+            }
+
             ts_content.push_str("\n  // Custom Types\n");
+
+            // Generate type aliases first so downstream types can reference them
+            for (alias_name, rhs) in &hyperapp_data.aliases {
+                let ts_alias = to_pascal_case(alias_name);
+                // Special-case: map WIT alias `value` to TS `unknown` for ergonomic JSON usage
+                let rhs_ts = if alias_name == "value" {
+                    "unknown".to_string()
+                } else {
+                    wit_type_to_typescript(rhs)
+                };
+                ts_content.push_str(&format!("  export type {} = {}\n", ts_alias, rhs_ts));
+            }
+            if !hyperapp_data.aliases.is_empty() {
+                ts_content.push_str("\n");
+            }
 
             // Generate enums first
             for enum_def in &hyperapp_data.enums {

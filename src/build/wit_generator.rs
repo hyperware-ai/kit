@@ -229,6 +229,10 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                 "u32" => Ok("u32".to_string()),
                 "i64" => Ok("s64".to_string()),
                 "u64" => Ok("u64".to_string()),
+                // WIT 1.0 does not support 128-bit integers. Represent these as strings
+                // to preserve full precision across language boundaries.
+                "i128" => Ok("string".to_string()),
+                "u128" => Ok("string".to_string()),
                 "f32" => Ok("f32".to_string()),
                 "f64" => Ok("f64".to_string()),
                 "usize" => Ok("u64".to_string()),
@@ -313,31 +317,47 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                         Err(eyre!("Failed to parse Result type arguments"))
                     }
                 }
-                // TODO: fix and enable
-                //"HashMap" | "BTreeMap" => {
-                //    if let syn::PathArguments::AngleBracketed(args) =
-                //        &type_path.path.segments.last().unwrap().arguments
-                //    {
-                //        if args.args.len() >= 2 {
-                //            if let (
-                //                Some(syn::GenericArgument::Type(key_ty)),
-                //                Some(syn::GenericArgument::Type(val_ty)),
-                //            ) = (args.args.first(), args.args.get(1))
-                //            {
-                //                let key_type = rust_type_to_wit(key_ty, used_types)?;
-                //                let val_type = rust_type_to_wit(val_ty, used_types)?;
-                //                // For HashMaps, we'll generate a list of tuples where each tuple contains a key and value
-                //                Ok(format!("list<tuple<{}, {}>>", key_type, val_type))
-                //            } else {
-                //                Ok("list<tuple<string, any>>".to_string())
-                //            }
-                //        } else {
-                //            Ok("list<tuple<string, any>>".to_string())
-                //        }
-                //    } else {
-                //        Ok("list<tuple<string, any>>".to_string())
-                //    }
-                //}
+                "HashMap" | "BTreeMap" => {
+                    if let syn::PathArguments::AngleBracketed(args) =
+                        &type_path.path.segments.last().unwrap().arguments
+                    {
+                        if args.args.len() >= 2 {
+                            if let (
+                                Some(syn::GenericArgument::Type(key_ty)),
+                                Some(syn::GenericArgument::Type(val_ty)),
+                            ) = (args.args.first(), args.args.get(1))
+                            {
+                                let key_type = rust_type_to_wit(key_ty, used_types)?;
+                                let val_type = rust_type_to_wit(val_ty, used_types)?;
+                                // Defer alias/string validation to later verification.
+                                // Generate a tuple-backed representation using the key type name
+                                // (which may be an alias like `node-id`) and let the alias
+                                // definition resolve to `string`.
+                                Ok(format!("list<tuple<{}, {}>>", key_type, val_type))
+                            } else {
+                                bail!("Failed to parse HashMap generic arguments");
+                            }
+                        } else {
+                            bail!("HashMap requires two generic arguments <K, V>");
+                        }
+                    } else {
+                        bail!("Failed to parse HashMap generic arguments");
+                    }
+                }
+                "HashSet" | "BTreeSet" => {
+                    if let syn::PathArguments::AngleBracketed(args) =
+                        &type_path.path.segments.last().unwrap().arguments
+                    {
+                        if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                            let inner = rust_type_to_wit(inner_ty, used_types)?;
+                            Ok(format!("list<{}>", inner))
+                        } else {
+                            bail!("Failed to parse HashSet inner type");
+                        }
+                    } else {
+                        bail!("Failed to parse HashSet inner type");
+                    }
+                }
                 custom => {
                     // Validate custom type name
                     validate_name(custom, "Type")?;
@@ -720,6 +740,23 @@ fn collect_single_type_definition(
                 return generate_enum_wit_definition(e, &name, &kebab_name, &mut dependencies)
                     .map(|wit_def| Some((wit_def, dependencies)));
             }
+            Item::Type(t) => {
+                let alias_name = t.ident.to_string();
+                // Skip internal types
+                if alias_name.contains("__") {
+                    continue;
+                }
+
+                let kebab_name = to_kebab_case(&alias_name);
+                if kebab_name != target_type_kebab {
+                    continue;
+                }
+
+                // Build alias: type <kebab> = <rhs>
+                let rhs = rust_type_to_wit(&t.ty, &mut dependencies)?;
+                let def = format!("type {} = {};", to_wit_ident(&kebab_name), rhs);
+                return Ok(Some((def, dependencies)));
+            }
             _ => {}
         }
     }
@@ -765,13 +802,20 @@ fn generate_struct_wit_definition(
             }
             Ok(field_strings)
         }
-        syn::Fields::Unnamed(_) => {
-            bail!(
-                "Struct '{}' has unnamed (tuple-style) fields, which are not supported in WIT. \
-                 WIT only supports named fields in records. \
-                 Consider converting to a struct with named fields.",
-                name
-            );
+        syn::Fields::Unnamed(fields) => {
+            // Support 1-tuple (newtype) structs by emitting a WIT type alias.
+            if fields.unnamed.len() == 1 {
+                let inner = &fields.unnamed[0];
+                let wit_type = rust_type_to_wit(&inner.ty, dependencies)?;
+                return Ok(format!("type {} = {};", to_wit_ident(&kebab_name), wit_type));
+            } else {
+                bail!(
+                    "Struct '{}' has {} unnamed (tuple-style) fields, which are not supported in WIT. \
+                     Only newtype (single-field) tuple structs are supported as type aliases.",
+                    name,
+                    fields.unnamed.len()
+                );
+            }
         }
         syn::Fields::Unit => {
             // Unit struct becomes an empty record
@@ -1263,6 +1307,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         .cloned()
         .collect::<HashSet<String>>();
     let mut collected_types = HashSet::new();
+    // Track every custom type referenced directly or via dependencies
+    let mut transitively_used_types: HashSet<String> = HashSet::new();
 
     // Iteratively collect type definitions and their dependencies
     while !types_to_collect.is_empty() {
@@ -1285,6 +1331,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
                         // Add dependencies to be collected
                         for dep in dependencies {
+                            transitively_used_types.insert(dep.clone());
                             if !is_wit_primitive_or_builtin(&dep) && !collected_types.contains(&dep)
                             {
                                 types_to_collect.insert(dep);
@@ -1311,6 +1358,46 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     }
 
     debug!(collected_count = %all_type_definitions.len(), "Collected type definitions in Pass 3");
+
+    // Merge direct and transitive used type sets for alias inference and verification
+    let mut all_used_types: HashSet<String> = global_used_types.clone();
+    all_used_types.extend(transitively_used_types.into_iter());
+
+    // Infer simple aliases for well-known leaf types that commonly appear but
+    // aren't defined as concrete structs/enums in Rust. These are injected
+    // ahead of explicit type definitions so downstream records can reference
+    // them.
+    let mut inferred_aliases: Vec<String> = Vec::new();
+    let mut inferred_types: HashSet<String> = HashSet::new();
+
+    for used_type_name in &all_used_types {
+        // Skip primitives/built-ins and anything we already have a definition for
+        if is_wit_primitive_or_builtin(used_type_name)
+            || all_type_definitions.contains_key(used_type_name)
+        {
+            continue;
+        }
+
+        // Normalize once
+        let t = used_type_name.as_str();
+
+        // 1) serde_json::Value shows up as `value`; define it as string in WIT so
+        // the type exists at the schema level (TS generator will map it to unknown
+        // for ergonomic JSON usage).
+        if t == "value" {
+            inferred_aliases.push(format!("type {} = string;", to_wit_ident("value")));
+            inferred_types.insert("value".to_string());
+            continue;
+        }
+
+        // 2) Common identifier aliases (GroupId, ThreadId, etc.) appear as kebab-case *-id.
+        // We only alias those that aren't defined explicitly in source code.
+        if t.ends_with("-id") {
+            inferred_aliases.push(format!("type {} = string;", to_wit_ident(t)));
+            inferred_types.insert(t.to_string());
+            continue;
+        }
+    }
 
     // --- 4. Build dependency graph and topologically sort types ---
     debug!("Pass 4: Building type dependency graph");
@@ -1414,9 +1501,10 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     // --- 5. Verify All Used Types Have Definitions ---
     debug!(final_used_types = ?global_used_types, available_definitions = ?all_type_definitions.keys(), "Starting final verification");
     let mut undefined_types = Vec::new();
-    for used_type_name in &global_used_types {
+    for used_type_name in &all_used_types {
         if !is_wit_primitive_or_builtin(used_type_name)
             && !all_type_definitions.contains_key(used_type_name)
+            && !inferred_types.contains(used_type_name)
         {
             warn!(type_name=%used_type_name, "Verification failed: Used type has no generated definition.");
             undefined_types.push(used_type_name.clone());
@@ -1464,6 +1552,16 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
         // Add standard imports (can be refined based on actual needs)
         content.push_str("    use standard.{address};\n"); // Assuming world includes 'standard'
+
+        // Add inferred aliases (if any)
+        if !inferred_aliases.is_empty() {
+            content.push('\n');
+            for line in &inferred_aliases {
+                content.push_str("    ");
+                content.push_str(line);
+                content.push('\n');
+            }
+        }
 
         // Add type definitions with proper indentation
         if !relevant_defs.is_empty() {
