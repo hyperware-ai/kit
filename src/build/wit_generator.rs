@@ -1363,40 +1363,16 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     let mut all_used_types: HashSet<String> = global_used_types.clone();
     all_used_types.extend(transitively_used_types.into_iter());
 
-    // Infer simple aliases for well-known leaf types that commonly appear but
-    // aren't defined as concrete structs/enums in Rust. These are injected
-    // ahead of explicit type definitions so downstream records can reference
-    // them.
+    // Minimal inference: only add alias for `value` when used.
     let mut inferred_aliases: Vec<String> = Vec::new();
     let mut inferred_types: HashSet<String> = HashSet::new();
-
-    for used_type_name in &all_used_types {
-        // Skip primitives/built-ins and anything we already have a definition for
-        if is_wit_primitive_or_builtin(used_type_name)
-            || all_type_definitions.contains_key(used_type_name)
-        {
-            continue;
-        }
-
-        // Normalize once
-        let t = used_type_name.as_str();
-
-        // 1) serde_json::Value shows up as `value`; define it as string in WIT so
-        // the type exists at the schema level (TS generator will map it to unknown
-        // for ergonomic JSON usage).
-        if t == "value" {
-            inferred_aliases.push(format!("type {} = string;", to_wit_ident("value")));
-            inferred_types.insert("value".to_string());
-            continue;
-        }
-
-        // 2) Common identifier aliases (GroupId, ThreadId, etc.) appear as kebab-case *-id.
-        // We only alias those that aren't defined explicitly in source code.
-        if t.ends_with("-id") {
-            inferred_aliases.push(format!("type {} = string;", to_wit_ident(t)));
-            inferred_types.insert(t.to_string());
-            continue;
-        }
+    if all_used_types.contains("value") && !all_type_definitions.contains_key("value") {
+        inferred_aliases.push(
+            "// Arbitrary JSON value; encoded as string for WIT 1.0 (TS: unknown, Rust: serde_json::Value)"
+                .to_string(),
+        );
+        inferred_aliases.push(format!("type {} = string;", to_wit_ident("value")));
+        inferred_types.insert("value".to_string());
     }
 
     // --- 4. Build dependency graph and topologically sort types ---
