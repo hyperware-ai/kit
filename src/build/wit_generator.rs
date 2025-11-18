@@ -807,7 +807,11 @@ fn generate_struct_wit_definition(
             if fields.unnamed.len() == 1 {
                 let inner = &fields.unnamed[0];
                 let wit_type = rust_type_to_wit(&inner.ty, dependencies)?;
-                return Ok(format!("type {} = {};", to_wit_ident(&kebab_name), wit_type));
+                return Ok(format!(
+                    "type {} = {};",
+                    to_wit_ident(&kebab_name),
+                    wit_type
+                ));
             } else {
                 bail!(
                     "Struct '{}' has {} unnamed (tuple-style) fields, which are not supported in WIT. \
