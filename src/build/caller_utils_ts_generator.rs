@@ -225,6 +225,45 @@ struct SignatureField {
     wit_type: String,
 }
 
+/// Parse a tuple type string like "tuple<u64, bool>" into its element types
+fn parse_tuple_types(tuple_type: &str) -> Vec<String> {
+    if !tuple_type.starts_with("tuple<") || !tuple_type.ends_with(">") {
+        return vec![];
+    }
+    let inner = &tuple_type[6..tuple_type.len() - 1];
+    if inner.is_empty() {
+        return vec![];
+    }
+    // Handle nested generics by tracking angle bracket depth
+    let mut types = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0;
+
+    for c in inner.chars() {
+        match c {
+            '<' => {
+                depth += 1;
+                current.push(c);
+            }
+            '>' => {
+                depth -= 1;
+                current.push(c);
+            }
+            ',' if depth == 0 => {
+                types.push(current.trim().to_string());
+                current = String::new();
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+    if !current.trim().is_empty() {
+        types.push(current.trim().to_string());
+    }
+    types
+}
+
 // Structure to represent a WIT signature struct
 #[derive(Debug)]
 struct SignatureStruct {
@@ -684,7 +723,6 @@ fn generate_typescript_function(
     let actual_param_type: String;
 
     for field in &signature.fields {
-        let field_name_camel = to_snake_case(&field.name);
         let ts_type = wit_type_to_typescript(&field.wit_type);
         debug!(field = %field.name, wit_type = %field.wit_type, ts_type = %ts_type, "Processing field");
 
@@ -700,10 +738,24 @@ fn generate_typescript_function(
                 unwrapped_return_type = ts_type;
             }
             debug!(return_type = %unwrapped_return_type, "Identified return type");
+        } else if field.name == "args" {
+            // Parse the args tuple to extract individual parameter types
+            let tuple_types = parse_tuple_types(&field.wit_type);
+            for (i, wit_type) in tuple_types.iter().enumerate() {
+                let param_name = format!("arg{}", i);
+                let param_ts_type = wit_type_to_typescript(wit_type);
+                params.push(format!("{}: {}", param_name, param_ts_type));
+                param_names.push(param_name);
+                param_types.push(param_ts_type);
+                debug!(param_name = %param_names.last().unwrap(), wit_type = %wit_type, "Added tuple parameter");
+            }
         } else {
+            // Legacy support: handle individual parameter fields (for backwards compatibility)
+            let field_name_camel = to_snake_case(&field.name);
             params.push(format!("{}: {}", field_name_camel, ts_type));
             param_names.push(field_name_camel);
             param_types.push(ts_type);
+            debug!(param_name = %param_names.last().unwrap(), "Added parameter (legacy)");
         }
     }
 

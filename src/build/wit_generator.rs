@@ -496,7 +496,10 @@ fn generate_signature_struct(
         struct_fields.push("        target: address".to_string());
     }
 
-    // Process function parameters (skip &self and &mut self)
+    // Collect function parameters (skip &self and &mut self) into a tuple
+    // This preserves ordering for LLM consumption (JSON objects don't guarantee order)
+    let mut param_names_and_types: Vec<(String, String)> = Vec::new();
+
     for arg in &method.sig.inputs {
         if let syn::FnArg::Typed(pat_type) = arg {
             if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
@@ -507,36 +510,49 @@ fn generate_signature_struct(
 
                 // Get original param name
                 let param_orig_name = pat_ident.ident.to_string();
-                let _method_name_for_error = method.sig.ident.to_string(); // Get method name for error messages
 
                 // Validate parameter name
                 match validate_name(&param_orig_name, "Parameter") {
                     Ok(_) => {
                         let stripped_param_name =
-                            check_and_strip_leading_underscore(param_orig_name.clone()); // Clone needed
+                            check_and_strip_leading_underscore(param_orig_name.clone());
                         let param_name = to_kebab_case(&stripped_param_name);
                         let param_wit_ident = to_wit_ident(&param_name);
 
                         // Rust type to WIT type
                         match rust_type_to_wit(&pat_type.ty, used_types) {
                             Ok(param_type) => {
-                                // Add field directly to the struct
-                                struct_fields
-                                    .push(format!("        {}: {}", param_wit_ident, param_type));
+                                param_names_and_types.push((param_wit_ident, param_type));
                             }
                             Err(e) => {
-                                // Return error, preserving the helpful validation message if present
                                 return Err(e);
                             }
                         }
                     }
                     Err(e) => {
-                        // Return the error directly
                         return Err(e);
                     }
                 }
             }
         }
+    }
+
+    // Generate args field as a tuple to preserve ordering
+    // Include a comment with parameter names for documentation
+    if !param_names_and_types.is_empty() {
+        let param_doc_parts: Vec<String> = param_names_and_types
+            .iter()
+            .map(|(name, ty)| format!("{}: {}", name, ty))
+            .collect();
+        let param_doc = param_doc_parts.join(", ");
+
+        let tuple_types: Vec<&str> = param_names_and_types
+            .iter()
+            .map(|(_, ty)| ty.as_str())
+            .collect();
+
+        struct_fields.push(format!("        // ({})", param_doc));
+        struct_fields.push(format!("        args: tuple<{}>", tuple_types.join(", ")));
     }
 
     // HTTP handlers no longer require parameters - they can have zero parameters
