@@ -578,10 +578,15 @@ fn generate_signature_struct(
                 .iter()
                 .map(|(name, _)| kebab_to_snake_case(name))
                 .collect();
+            // Single arg: no array brackets, multiple args: use array
+            let args_fmt = if snake_params.len() == 1 {
+                snake_params[0].clone()
+            } else {
+                format!("[{}]", snake_params.join(", "))
+            };
             comment.push_str(&format!(
-                "\n    // json fmt: {{\"{}\": [{}]}}",
-                pascal_name,
-                snake_params.join(", ")
+                "\n    // json fmt: {{\"{}\": {}}}",
+                pascal_name, args_fmt
             ));
         }
 
