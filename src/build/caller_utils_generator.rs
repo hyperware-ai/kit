@@ -188,12 +188,70 @@ fn parse_tuple_types(tuple_type: &str) -> Vec<String> {
     types
 }
 
+/// Parse args comment like `// args: (foo: u64, bar: bool)` into parameter names
+fn parse_args_comment(comment: &str) -> Vec<String> {
+    let comment = comment.trim().trim_start_matches("//").trim();
+    if !comment.starts_with("args:") {
+        return vec![];
+    }
+    let args_part = comment.trim_start_matches("args:").trim();
+    if !args_part.starts_with("(") || !args_part.ends_with(")") {
+        return vec![];
+    }
+    let inner = &args_part[1..args_part.len() - 1];
+    if inner.is_empty() {
+        return vec![];
+    }
+
+    let mut names = Vec::new();
+    // Handle nested generics by tracking angle bracket depth
+    let mut current = String::new();
+    let mut depth = 0;
+
+    for c in inner.chars() {
+        match c {
+            '<' => {
+                depth += 1;
+                current.push(c);
+            }
+            '>' => {
+                depth -= 1;
+                current.push(c);
+            }
+            ',' if depth == 0 => {
+                // Extract name from "name: type"
+                if let Some(name) = current.split(':').next() {
+                    let name = name.trim();
+                    if !name.is_empty() {
+                        names.push(name.to_string());
+                    }
+                }
+                current = String::new();
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+    // Handle last parameter
+    if !current.trim().is_empty() {
+        if let Some(name) = current.split(':').next() {
+            let name = name.trim();
+            if !name.is_empty() {
+                names.push(name.to_string());
+            }
+        }
+    }
+    names
+}
+
 // Structure to represent a WIT signature struct
 #[derive(Debug)]
 struct SignatureStruct {
     function_name: String,
     attr_type: String,
     fields: Vec<SignatureField>,
+    args_comment: Option<String>, // Parsed from // args: (name: type, ...) comment
 }
 
 // Find all interface imports in the world WIT file
@@ -250,6 +308,7 @@ fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>
     // Simple parser for WIT files to extract record definitions and types
     let lines: Vec<_> = content.lines().collect();
     let mut i = 0;
+    let mut pending_args_comment: Option<String> = None;
 
     while i < lines.len() {
         let line = lines[i].trim();
@@ -272,6 +331,12 @@ fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>
             debug!(name = %variant_name, "Found type definition (variant)");
             type_names.push(variant_name.to_string());
         }
+        // Look for args comment above record: // args: (name: type, ...)
+        else if line.starts_with("// args:") {
+            // Store this comment - it will be used by the next signature record
+            pending_args_comment = Some(line.to_string());
+            debug!(args_comment = %line, "Found args comment");
+        }
         // Look for signature record definitions
         else if line.starts_with("record ") && line.contains("-signature-") {
             let record_name = line
@@ -291,6 +356,9 @@ fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>
             let function_name = parts[0].to_string();
             let attr_type = parts[1].to_string();
             debug!(function = %function_name, attr_type = %attr_type, "Extracted function name and type");
+
+            // Use the pending args comment if present
+            let args_comment = pending_args_comment.take();
 
             // Parse fields
             let mut fields = Vec::new();
@@ -325,6 +393,7 @@ fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>
                 function_name,
                 attr_type,
                 fields,
+                args_comment,
             });
         }
 
@@ -352,6 +421,21 @@ fn generate_async_function(signature: &SignatureStruct) -> Option<String> {
     let full_function_name = format!("{}_{}_rpc", snake_function_name, signature.attr_type);
     debug!(name = %full_function_name, "Generating function stub");
 
+    // Extract arg names from the args comment if present
+    let arg_names: Vec<String> = signature
+        .args_comment
+        .as_ref()
+        .map(|c| {
+            parse_args_comment(c)
+                .into_iter()
+                .map(|n| to_snake_case(&n))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !arg_names.is_empty() {
+        debug!(arg_names = ?arg_names, "Parsed arg names from comment");
+    }
+
     // Extract parameters and return type
     let mut params = Vec::new();
     let mut param_names = Vec::new();
@@ -372,11 +456,15 @@ fn generate_async_function(signature: &SignatureStruct) -> Option<String> {
         } else if field.name == "returning" {
             return_type = rust_type;
             debug!(return_type = %return_type, "Identified return type");
-        } else if field.name == "args" {
-            // Parse the args tuple to extract individual parameter types
+        } else if field.name == "arg-types" {
+            // Parse the arg-types tuple to extract individual parameter types
             let tuple_types = parse_tuple_types(&field.wit_type);
             for (i, wit_type) in tuple_types.iter().enumerate() {
-                let param_name = format!("arg{}", i);
+                // Use actual arg name if available, otherwise fall back to arg0, arg1, etc.
+                let param_name = arg_names
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| format!("arg{}", i));
                 let param_rust_type = wit_type_to_rust(wit_type);
                 params.push(format!("{}: {}", param_name, param_rust_type));
                 param_names.push(param_name);

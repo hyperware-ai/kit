@@ -98,6 +98,24 @@ fn to_wit_ident(kebab_name: &str) -> String {
     }
 }
 
+// Convert kebab-case to PascalCase
+fn to_pascal_case(s: &str) -> String {
+    s.split('-')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().chain(chars).collect(),
+            }
+        })
+        .collect()
+}
+
+// Convert kebab-case to snake_case
+fn kebab_to_snake_case(s: &str) -> String {
+    s.replace('-', "_")
+}
+
 // Validates a name doesn't contain numbers or "stream"
 fn validate_name(name: &str, kind: &str) -> Result<()> {
     // Check for numbers
@@ -537,22 +555,48 @@ fn generate_signature_struct(
         }
     }
 
-    // Generate args field as a tuple to preserve ordering
-    // Include a comment with parameter names for documentation
+    // Generate arg-types tuple to preserve ordering for LLM consumption
+    // The args comment goes above the record to document the full signature with names
     if !param_names_and_types.is_empty() {
-        let param_doc_parts: Vec<String> = param_names_and_types
+        let args_doc: Vec<String> = param_names_and_types
             .iter()
             .map(|(name, ty)| format!("{}: {}", name, ty))
             .collect();
-        let param_doc = param_doc_parts.join(", ");
 
         let tuple_types: Vec<&str> = param_names_and_types
             .iter()
             .map(|(_, ty)| ty.as_str())
             .collect();
 
-        struct_fields.push(format!("        // ({})", param_doc));
-        struct_fields.push(format!("        args: tuple<{}>", tuple_types.join(", ")));
+        // Add args comment above the record (appended to the function comment)
+        comment.push_str(&format!("\n    // args: ({})", args_doc.join(", ")));
+
+        // Add JSON format comment for local and remote endpoints
+        if attr_type == "local" || attr_type == "remote" {
+            let pascal_name = to_pascal_case(kebab_name);
+            let snake_params: Vec<String> = param_names_and_types
+                .iter()
+                .map(|(name, _)| kebab_to_snake_case(name))
+                .collect();
+            comment.push_str(&format!(
+                "\n    // json fmt: {{\"{}\": [{}]}}",
+                pascal_name,
+                snake_params.join(", ")
+            ));
+        }
+
+        struct_fields.push(format!(
+            "        arg-types: tuple<{}>",
+            tuple_types.join(", ")
+        ));
+    } else {
+        comment.push_str("\n    // args: none");
+
+        // Add JSON format comment for local and remote endpoints with no args
+        if attr_type == "local" || attr_type == "remote" {
+            let pascal_name = to_pascal_case(kebab_name);
+            comment.push_str(&format!("\n    // json fmt: {{\"{}\": null}}", pascal_name));
+        }
     }
 
     // HTTP handlers no longer require parameters - they can have zero parameters
