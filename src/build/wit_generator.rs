@@ -182,9 +182,7 @@ fn is_hyperapp_attr(attr: &Attribute) -> bool {
     }
     // Check for hyperapp_macro::hyperapp
     let segments: Vec<_> = path.segments.iter().collect();
-    segments.len() == 2
-        && segments[0].ident == "hyperapp_macro"
-        && segments[1].ident == "hyperapp"
+    segments.len() == 2 && segments[0].ident == "hyperapp_macro" && segments[1].ident == "hyperapp"
 }
 
 // Extract wit_world from the #[hyperapp] attribute using the format in the debug representation
@@ -1238,11 +1236,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     debug!("Scanning lib.rs for impl block with #[hyperapp] attribute");
     for item in &ast.items {
         if let Item::Impl(impl_item) = item {
-            if let Some(attr) = impl_item
-                .attrs
-                .iter()
-                .find(|a| is_hyperapp_attr(a))
-            {
+            if let Some(attr) = impl_item.attrs.iter().find(|a| is_hyperapp_attr(a)) {
                 debug!("Found #[hyperapp] attribute");
                 // Attempt to extract wit_world. Propagate error if extraction fails.
                 let world_name = extract_wit_world(&[attr.clone()])
@@ -1277,7 +1271,10 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     }
                 } else {
                     // If interface name couldn't be extracted, it's an error for this project.
-                    bail!("Could not extract interface name from #[hyperapp] impl block type: {:?}", impl_item.self_ty);
+                    bail!(
+                        "Could not extract interface name from #[hyperapp] impl block type: {:?}",
+                        impl_item.self_ty
+                    );
                 }
             }
         }
