@@ -863,7 +863,7 @@ fn read_cargo_toml(path: &Path) -> Result<Value> {
 #[instrument(level = "trace", skip_all)]
 fn get_hyperware_process_lib_dependency(base_dir: &Path) -> Result<String> {
     const DEFAULT_DEP: &str =
-        r#"{ git = "https://github.com/hyperware-ai/hyperprocess-macro", rev = "4c944b2" }"#;
+        r#"{ git = "https://github.com/hyperware-ai/hyperapp-macro", rev = "4c944b2" }"#;
 
     // Read workspace members
     let workspace_toml = read_cargo_toml(&base_dir.join("Cargo.toml"))?;
