@@ -98,6 +98,24 @@ fn to_wit_ident(kebab_name: &str) -> String {
     }
 }
 
+// Convert kebab-case to PascalCase
+fn to_pascal_case(s: &str) -> String {
+    s.split('-')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().chain(chars).collect(),
+            }
+        })
+        .collect()
+}
+
+// Convert kebab-case to snake_case
+fn kebab_to_snake_case(s: &str) -> String {
+    s.replace('-', "_")
+}
+
 // Validates a name doesn't contain numbers or "stream"
 fn validate_name(name: &str, kind: &str) -> Result<()> {
     // Check for numbers
@@ -155,11 +173,23 @@ fn remove_state_suffix(name: &str) -> String {
     name.to_string()
 }
 
-// Extract wit_world from the #[hyperprocess] attribute using the format in the debug representation
+/// Check if an attribute path refers to the hyperapp attribute.
+/// Matches both `#[hyperapp]` and `#[hyperapp_macro::hyperapp]`.
+fn is_hyperapp_attr(attr: &Attribute) -> bool {
+    let path = attr.path();
+    if path.is_ident("hyperapp") {
+        return true;
+    }
+    // Check for hyperapp_macro::hyperapp
+    let segments: Vec<_> = path.segments.iter().collect();
+    segments.len() == 2 && segments[0].ident == "hyperapp_macro" && segments[1].ident == "hyperapp"
+}
+
+// Extract wit_world from the #[hyperapp] attribute using the format in the debug representation
 #[instrument(level = "trace", skip_all)]
 fn extract_wit_world(attrs: &[Attribute]) -> Result<String> {
     for attr in attrs {
-        if attr.path().is_ident("hyperprocess") {
+        if is_hyperapp_attr(attr) {
             // Convert attribute to string representation
             let attr_str = format!("{:?}", attr);
             debug!(attr_str = %attr_str, "Attribute string");
@@ -183,7 +213,7 @@ fn extract_wit_world(attrs: &[Attribute]) -> Result<String> {
             }
         }
     }
-    bail!("wit_world not found in hyperprocess attribute")
+    bail!("wit_world not found in hyperapp attribute")
 }
 // Helper function to check if a WIT type name is a primitive or known built-in
 fn is_wit_primitive_or_builtin(type_name: &str) -> bool {
@@ -516,7 +546,10 @@ fn generate_signature_struct(
         struct_fields.push("        target: address".to_string());
     }
 
-    // Process function parameters (skip &self and &mut self)
+    // Collect function parameters (skip &self and &mut self) into a tuple
+    // This preserves ordering for LLM consumption (JSON objects don't guarantee order)
+    let mut param_names_and_types: Vec<(String, String)> = Vec::new();
+
     for arg in &method.sig.inputs {
         if let syn::FnArg::Typed(pat_type) = arg {
             if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
@@ -527,35 +560,79 @@ fn generate_signature_struct(
 
                 // Get original param name
                 let param_orig_name = pat_ident.ident.to_string();
-                let _method_name_for_error = method.sig.ident.to_string(); // Get method name for error messages
 
                 // Validate parameter name
                 match validate_name(&param_orig_name, "Parameter") {
                     Ok(_) => {
                         let stripped_param_name =
-                            check_and_strip_leading_underscore(param_orig_name.clone()); // Clone needed
+                            check_and_strip_leading_underscore(param_orig_name.clone());
                         let param_name = to_kebab_case(&stripped_param_name);
                         let param_wit_ident = to_wit_ident(&param_name);
 
                         // Rust type to WIT type
                         match rust_type_to_wit(&pat_type.ty, used_types) {
                             Ok(param_type) => {
-                                // Add field directly to the struct
-                                struct_fields
-                                    .push(format!("        {}: {}", param_wit_ident, param_type));
+                                param_names_and_types.push((param_wit_ident, param_type));
                             }
                             Err(e) => {
-                                // Return error, preserving the helpful validation message if present
                                 return Err(e);
                             }
                         }
                     }
                     Err(e) => {
-                        // Return the error directly
                         return Err(e);
                     }
                 }
             }
+        }
+    }
+
+    // Generate arg-types tuple to preserve ordering for LLM consumption
+    // The args comment goes above the record to document the full signature with names
+    if !param_names_and_types.is_empty() {
+        let args_doc: Vec<String> = param_names_and_types
+            .iter()
+            .map(|(name, ty)| format!("{}: {}", name, ty))
+            .collect();
+
+        let tuple_types: Vec<&str> = param_names_and_types
+            .iter()
+            .map(|(_, ty)| ty.as_str())
+            .collect();
+
+        // Add args comment above the record (appended to the function comment)
+        comment.push_str(&format!("\n    // args: ({})", args_doc.join(", ")));
+
+        // Add JSON format comment for local and remote endpoints
+        if attr_type == "local" || attr_type == "remote" {
+            let pascal_name = to_pascal_case(kebab_name);
+            let snake_params: Vec<String> = param_names_and_types
+                .iter()
+                .map(|(name, _)| kebab_to_snake_case(name))
+                .collect();
+            // Single arg: no array brackets, multiple args: use array
+            let args_fmt = if snake_params.len() == 1 {
+                snake_params[0].clone()
+            } else {
+                format!("[{}]", snake_params.join(", "))
+            };
+            comment.push_str(&format!(
+                "\n    // json fmt: {{\"{}\": {}}}",
+                pascal_name, args_fmt
+            ));
+        }
+
+        struct_fields.push(format!(
+            "        arg-types: tuple<{}>",
+            tuple_types.join(", ")
+        ));
+    } else {
+        comment.push_str("\n    // args: none");
+
+        // Add JSON format comment for local and remote endpoints with no args
+        if attr_type == "local" || attr_type == "remote" {
+            let pascal_name = to_pascal_case(kebab_name);
+            comment.push_str(&format!("\n    // json fmt: {{\"{}\": null}}", pascal_name));
         }
     }
 
@@ -1154,20 +1231,16 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     let mut wit_world = None;
     let mut interface_name = None; // Original Rust name (e.g., MyProcessState)
     let mut kebab_interface_name = None; // Kebab-case name (e.g., my-process)
-    let mut impl_item_with_hyperprocess = None;
+    let mut impl_item_with_hyperapp = None;
 
-    debug!("Scanning lib.rs for impl block with #[hyperprocess] attribute");
+    debug!("Scanning lib.rs for impl block with #[hyperapp] attribute");
     for item in &ast.items {
         if let Item::Impl(impl_item) = item {
-            if let Some(attr) = impl_item
-                .attrs
-                .iter()
-                .find(|a| a.path().is_ident("hyperprocess"))
-            {
-                debug!("Found #[hyperprocess] attribute");
+            if let Some(attr) = impl_item.attrs.iter().find(|a| is_hyperapp_attr(a)) {
+                debug!("Found #[hyperapp] attribute");
                 // Attempt to extract wit_world. Propagate error if extraction fails.
                 let world_name = extract_wit_world(&[attr.clone()])
-                    .wrap_err("Failed to extract wit_world from #[hyperprocess] attribute")?;
+                    .wrap_err("Failed to extract wit_world from #[hyperapp] attribute")?;
                 debug!(wit_world = %world_name, "Extracted wit_world");
                 wit_world = Some(world_name);
 
@@ -1185,30 +1258,33 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                             let base_name = remove_state_suffix(name);
                             kebab_interface_name = Some(to_kebab_case(&base_name));
                             debug!(interface_name = %name, base_name = %base_name, kebab_name = ?kebab_interface_name, "Interface details");
-                            impl_item_with_hyperprocess = Some(impl_item.clone());
+                            impl_item_with_hyperapp = Some(impl_item.clone());
                             break; // Found the target impl block
                         }
                         Err(e) => {
                             // Escalate errors for invalid interface names instead of just warning
                             return Err(e.wrap_err(format!(
-                                "Invalid interface name '{}' in hyperprocess impl block",
+                                "Invalid interface name '{}' in hyperapp impl block",
                                 name
                             )));
                         }
                     }
                 } else {
                     // If interface name couldn't be extracted, it's an error for this project.
-                    bail!("Could not extract interface name from #[hyperprocess] impl block type: {:?}", impl_item.self_ty);
+                    bail!(
+                        "Could not extract interface name from #[hyperapp] impl block type: {:?}",
+                        impl_item.self_ty
+                    );
                 }
             }
         }
     }
 
-    // Exit early if no valid hyperprocess impl block was identified
-    let Some(ref impl_item) = impl_item_with_hyperprocess else {
+    // Exit early if no valid hyperapp impl block was identified
+    let Some(ref impl_item) = impl_item_with_hyperapp else {
         // If we looped through everything and didn't find a block (and didn't error above),
-        // it means no #[hyperprocess] attribute was found at all. This is okay, just skip.
-        warn!(project_path=%project_path.display(), "No #[hyperprocess] impl block found in lib.rs, skipping project");
+        // it means no #[hyperapp] attribute was found at all. This is okay, just skip.
+        warn!(project_path=%project_path.display(), "No #[hyperapp] impl block found in lib.rs, skipping project");
         return Ok(None);
     };
     // These unwraps are safe due to the checks above ensuring we error or break successfully
@@ -1219,7 +1295,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     let mut signature_structs = Vec::new(); // Stores WIT string for each signature record
     let mut global_used_types = HashSet::new(); // All custom WIT types encountered (kebab-case)
 
-    debug!("Pass 2: Analyzing functions in hyperprocess impl block");
+    debug!("Pass 2: Analyzing functions in hyperapp impl block");
     for item in &impl_item.items {
         if let ImplItem::Fn(method) = item {
             let method_name = method.sig.ident.to_string();
@@ -1290,9 +1366,9 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     signature_structs.push(sig_struct);
                 }
             } else {
-                // Method in hyperprocess impl lacks required attribute - Error
+                // Method in hyperapp impl lacks required attribute - Error
                 return Err(eyre!(
-                         "Method '{}' in the #[hyperprocess] impl block is missing a required attribute ([remote], [local], [http], [init], [ws], [ws_client] or [eth]). Only methods with these attributes should be included.",
+                         "Method '{}' in the #[hyperapp] impl block is missing a required attribute ([remote], [local], [http], [init], [ws], [ws_client] or [eth]). Only methods with these attributes should be included.",
                          method_name
                      ));
             }
@@ -1715,7 +1791,7 @@ mod tests {
 
         // Create a lib.rs with a handler that uses SimpleStruct but not UnusedStruct
         let lib_content = r#"
-use hyperware_macros::hyperprocess;
+use hyperware_macros::hyperapp;
 
 pub struct SimpleStruct {
     pub name: String,
@@ -1730,7 +1806,7 @@ pub enum UnusedEnum {
 
 pub struct ProcessState;
 
-#[hyperprocess(wit_world = "test-world")]
+#[hyperapp(wit_world = "test-world")]
 impl ProcessState {
     #[remote]
     pub fn handler(&self, input: SimpleStruct) -> Result<String, String> {
@@ -1816,7 +1892,7 @@ package = "test:component"
 
         // Create a lib.rs with nested type dependencies
         let lib_content = r#"
-use hyperware_macros::hyperprocess;
+use hyperware_macros::hyperapp;
 
 pub struct LevelOne {
     pub data: LevelTwo,
@@ -1836,7 +1912,7 @@ pub struct UnusedDeep {
 
 pub struct ProcessState;
 
-#[hyperprocess(wit_world = "test-world")]
+#[hyperapp(wit_world = "test-world")]
 impl ProcessState {
     #[remote]
     pub fn handler(&self, input: LevelOne) -> Result<(), String> {
@@ -1918,7 +1994,7 @@ package = "test:component"
 
         // Create a lib.rs with a handler that uses an incompatible enum
         let lib_content = r#"
-use hyperware_macros::hyperprocess;
+use hyperware_macros::hyperapp;
 
 pub enum BadEnum {
     Variant { name: String, count: u32 },  // Struct-like variant - should fail
@@ -1926,7 +2002,7 @@ pub enum BadEnum {
 
 pub struct ProcessState;
 
-#[hyperprocess(wit_world = "test-world")]
+#[hyperapp(wit_world = "test-world")]
 impl ProcessState {
     #[remote]
     pub fn handler(&self, input: BadEnum) -> Result<(), String> {
@@ -1979,7 +2055,7 @@ package = "test:component"
 
         // Create a lib.rs with a struct that has fields with numbers
         let lib_content = r#"
-use hyperware_macros::hyperprocess;
+use hyperware_macros::hyperapp;
 
 pub struct TestStruct {
     pub field1: String,  // This will trigger the error
@@ -1988,7 +2064,7 @@ pub struct TestStruct {
 
 pub struct ProcessState;
 
-#[hyperprocess(wit_world = "test-world")]
+#[hyperapp(wit_world = "test-world")]
 impl ProcessState {
     #[remote]
     pub fn handler(&self, input: TestStruct) -> Result<(), String> {
@@ -2055,7 +2131,7 @@ package = "test:component"
 
         // Create a lib.rs with a struct that has 'stream' in the name
         let lib_content = r#"
-use hyperware_macros::hyperprocess;
+use hyperware_macros::hyperapp;
 
 pub struct DataStream {  // This will trigger the error
     pub data: String,
@@ -2063,7 +2139,7 @@ pub struct DataStream {  // This will trigger the error
 
 pub struct ProcessState;
 
-#[hyperprocess(wit_world = "test-world")]
+#[hyperapp(wit_world = "test-world")]
 impl ProcessState {
     #[remote]
     pub fn handler(&self, input: DataStream) -> Result<(), String> {
@@ -2208,9 +2284,9 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
                 processed_projects.push(project_path.clone());
                 wit_worlds.insert(wit_world);
             }
-            // Project was skipped intentionally (e.g., no lib.rs, no #[hyperprocess])
+            // Project was skipped intentionally (e.g., no lib.rs, no #[hyperapp])
             Ok(None) => {
-                debug!(project = %project_path.display(), "Project skipped during processing (e.g., no lib.rs or #[hyperprocess] found)");
+                debug!(project = %project_path.display(), "Project skipped during processing (e.g., no lib.rs or #[hyperapp] found)");
                 // Continue to the next project
                 continue;
             }

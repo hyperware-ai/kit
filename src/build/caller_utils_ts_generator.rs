@@ -49,6 +49,17 @@ pub fn to_pascal_case(s: &str) -> String {
     result
 }
 
+// Convert kebab-case to camelCase
+pub fn to_camel_case(s: &str) -> String {
+    let pascal = to_pascal_case(s);
+    if pascal.is_empty() {
+        return pascal;
+    }
+    let mut chars = pascal.chars();
+    let first = chars.next().unwrap().to_lowercase().next().unwrap();
+    std::iter::once(first).chain(chars).collect()
+}
+
 // Extract hyperapp name from WIT filename
 fn extract_hyperapp_name(wit_file_path: &Path) -> Option<String> {
     wit_file_path
@@ -225,6 +236,102 @@ struct SignatureField {
     wit_type: String,
 }
 
+/// Parse a tuple type string like "tuple<u64, bool>" into its element types
+fn parse_tuple_types(tuple_type: &str) -> Vec<String> {
+    if !tuple_type.starts_with("tuple<") || !tuple_type.ends_with(">") {
+        return vec![];
+    }
+    let inner = &tuple_type[6..tuple_type.len() - 1];
+    if inner.is_empty() {
+        return vec![];
+    }
+    // Handle nested generics by tracking angle bracket depth
+    let mut types = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0;
+
+    for c in inner.chars() {
+        match c {
+            '<' => {
+                depth += 1;
+                current.push(c);
+            }
+            '>' => {
+                depth -= 1;
+                current.push(c);
+            }
+            ',' if depth == 0 => {
+                types.push(current.trim().to_string());
+                current = String::new();
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+    if !current.trim().is_empty() {
+        types.push(current.trim().to_string());
+    }
+    types
+}
+
+/// Parse args comment like `// args: (foo: u64, bar: bool)` into parameter names
+fn parse_args_comment(comment: &str) -> Vec<String> {
+    let comment = comment.trim().trim_start_matches("//").trim();
+    if !comment.starts_with("args:") {
+        return vec![];
+    }
+    let args_part = comment.trim_start_matches("args:").trim();
+    if !args_part.starts_with("(") || !args_part.ends_with(")") {
+        return vec![];
+    }
+    let inner = &args_part[1..args_part.len() - 1];
+    if inner.is_empty() {
+        return vec![];
+    }
+
+    let mut names = Vec::new();
+    // Handle nested generics by tracking angle bracket depth
+    let mut current = String::new();
+    let mut depth = 0;
+
+    for c in inner.chars() {
+        match c {
+            '<' => {
+                depth += 1;
+                current.push(c);
+            }
+            '>' => {
+                depth -= 1;
+                current.push(c);
+            }
+            ',' if depth == 0 => {
+                // Extract name from "name: type"
+                if let Some(name) = current.split(':').next() {
+                    let name = name.trim();
+                    if !name.is_empty() {
+                        names.push(name.to_string());
+                    }
+                }
+                current = String::new();
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+    // Handle last parameter
+    if !current.trim().is_empty() {
+        if let Some(name) = current.split(':').next() {
+            let name = name.trim();
+            if !name.is_empty() {
+                names.push(name.to_string());
+            }
+        }
+    }
+    names
+}
+
 // Structure to represent a WIT signature struct
 #[derive(Debug)]
 struct SignatureStruct {
@@ -233,6 +340,7 @@ struct SignatureStruct {
     fields: Vec<SignatureField>,
     http_method: Option<String>,
     http_path: Option<String>,
+    args_comment: Option<String>, // Parsed from // args: (name: type, ...) comment
 }
 
 // Structure to represent a WIT record
@@ -299,9 +407,18 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
     // Simple parser for WIT files to extract record definitions
     let lines: Vec<_> = content.lines().collect();
     let mut i = 0;
+    let mut pending_args_comment: Option<String> = None;
 
     while i < lines.len() {
         let line = lines[i].trim();
+
+        // Look for args comment above record: // args: (name: type, ...)
+        if line.starts_with("// args:") {
+            pending_args_comment = Some(line.to_string());
+            debug!(args_comment = %line, "Found args comment");
+            i += 1;
+            continue;
+        }
 
         // Look for type aliases
         if line.starts_with("type ") {
@@ -374,6 +491,9 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                     }
                 }
 
+                // Use the pending args comment if present
+                let args_comment = pending_args_comment.take();
+
                 // Parse fields
                 let mut fields = Vec::new();
                 i += 1;
@@ -409,6 +529,7 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                     fields,
                     http_method,
                     http_path,
+                    args_comment,
                 });
             } else {
                 // This is a regular record
@@ -683,6 +804,21 @@ fn generate_typescript_function(
 
     debug!(name = %camel_function_name, "Generating TypeScript function");
 
+    // Extract arg names from the args comment if present
+    let arg_names: Vec<String> = signature
+        .args_comment
+        .as_ref()
+        .map(|c| {
+            parse_args_comment(c)
+                .into_iter()
+                .map(|n| to_camel_case(&n))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !arg_names.is_empty() {
+        debug!(arg_names = ?arg_names, "Parsed arg names from comment");
+    }
+
     // Extract parameters and return type
     let mut params = Vec::new();
     let mut param_names = Vec::new();
@@ -702,7 +838,6 @@ fn generate_typescript_function(
     let actual_param_type: String;
 
     for field in &signature.fields {
-        let field_name_camel = to_snake_case(&field.name);
         let ts_type = wit_type_to_typescript(&field.wit_type);
         debug!(field = %field.name, wit_type = %field.wit_type, ts_type = %ts_type, "Processing field");
 
@@ -718,10 +853,28 @@ fn generate_typescript_function(
                 unwrapped_return_type = ts_type;
             }
             debug!(return_type = %unwrapped_return_type, "Identified return type");
+        } else if field.name == "arg-types" {
+            // Parse the arg-types tuple to extract individual parameter types
+            let tuple_types = parse_tuple_types(&field.wit_type);
+            for (i, wit_type) in tuple_types.iter().enumerate() {
+                // Use actual arg name if available, otherwise fall back to arg0, arg1, etc.
+                let param_name = arg_names
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| format!("arg{}", i));
+                let param_ts_type = wit_type_to_typescript(wit_type);
+                params.push(format!("{}: {}", param_name, param_ts_type));
+                param_names.push(param_name);
+                param_types.push(param_ts_type);
+                debug!(param_name = %param_names.last().unwrap(), wit_type = %wit_type, "Added tuple parameter");
+            }
         } else {
+            // Legacy support: handle individual parameter fields (for backwards compatibility)
+            let field_name_camel = to_snake_case(&field.name);
             params.push(format!("{}: {}", field_name_camel, ts_type));
             param_names.push(field_name_camel);
             param_types.push(ts_type);
+            debug!(param_name = %param_names.last().unwrap(), "Added parameter (legacy)");
         }
     }
 
