@@ -173,11 +173,25 @@ fn remove_state_suffix(name: &str) -> String {
     name.to_string()
 }
 
+/// Check if an attribute path refers to the hyperapp attribute.
+/// Matches both `#[hyperapp]` and `#[hyperapp_macro::hyperapp]`.
+fn is_hyperapp_attr(attr: &Attribute) -> bool {
+    let path = attr.path();
+    if path.is_ident("hyperapp") {
+        return true;
+    }
+    // Check for hyperapp_macro::hyperapp
+    let segments: Vec<_> = path.segments.iter().collect();
+    segments.len() == 2
+        && segments[0].ident == "hyperapp_macro"
+        && segments[1].ident == "hyperapp"
+}
+
 // Extract wit_world from the #[hyperapp] attribute using the format in the debug representation
 #[instrument(level = "trace", skip_all)]
 fn extract_wit_world(attrs: &[Attribute]) -> Result<String> {
     for attr in attrs {
-        if attr.path().is_ident("hyperapp") {
+        if is_hyperapp_attr(attr) {
             // Convert attribute to string representation
             let attr_str = format!("{:?}", attr);
             debug!(attr_str = %attr_str, "Attribute string");
@@ -1227,7 +1241,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             if let Some(attr) = impl_item
                 .attrs
                 .iter()
-                .find(|a| a.path().is_ident("hyperapp"))
+                .find(|a| is_hyperapp_attr(a))
             {
                 debug!("Found #[hyperapp] attribute");
                 // Attempt to extract wit_world. Propagate error if extraction fails.
