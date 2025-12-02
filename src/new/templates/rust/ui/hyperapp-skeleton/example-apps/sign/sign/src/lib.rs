@@ -4,8 +4,7 @@ use hyperware_process_lib::logging::{init_logging, Level};
 use hyperware_process_lib::net::{NetAction, NetResponse};
 use hyperware_process_lib::{last_blob, our, LazyLoadBlob, Request};
 
-use hyperware_app_common::{send_rmp, source};
-use hyperprocess_macro::hyperprocess;
+use hyperware_app_common::hyperapp::{send_rmp, source};
 
 #[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
 struct SignState {}
@@ -69,7 +68,7 @@ fn make_message(bytes: &Vec<u8>) -> Vec<u8> {
     [source().to_string().as_bytes(), &bytes].concat()
 }
 
-#[hyperprocess(
+#[hyperapp_macro::hyperapp(
     name = "sign",
     ui = None,
     endpoints = vec![],

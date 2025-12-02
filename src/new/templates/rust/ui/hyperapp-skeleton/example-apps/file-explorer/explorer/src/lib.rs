@@ -1,4 +1,3 @@
-use hyperprocess_macro::hyperprocess;
 use hyperware_process_lib::hyperapp::{add_response_header, get_path, send, SaveOptions};
 use hyperware_process_lib::logging::{debug, error, info, init_logging, Level};
 use hyperware_process_lib::our;
@@ -11,7 +10,6 @@ const ICON: &str = include_str!("./icon");
 const PROCESS_ID_LINK: &str = "explorer:file-explorer:sys";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct FileInfo {
     pub name: String,
     pub path: String,
@@ -36,7 +34,7 @@ struct FileExplorerState {
     cwd: String,
 }
 
-#[hyperprocess(
+#[hyperapp_macro::hyperapp(
     name = "file-explorer",
     ui = Some(HttpBindingConfig::default().secure_subdomain(true)),
     endpoints = vec![

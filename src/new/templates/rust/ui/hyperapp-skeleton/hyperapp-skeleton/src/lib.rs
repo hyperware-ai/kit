@@ -2,14 +2,6 @@
 // This is a minimal, well-commented skeleton app for the Hyperware platform
 // using the Hyperapp framework (macro-driven approach).
 
-// CRITICAL IMPORTS - DO NOT MODIFY THESE
-// The hyperprocess_macro provides everything you need including:
-// - Async/await support (custom runtime)
-// - Automatic WIT (WebAssembly Interface Types) generation
-// - State persistence
-// - HTTP/WebSocket bindings
-use hyperprocess_macro::hyperprocess;
-
 use hyperware_process_lib::{homepage::add_to_homepage, our, println};
 use serde::{Deserialize, Serialize};
 
@@ -33,8 +25,13 @@ pub struct Status {
 }
 
 // STEP 2: IMPLEMENT YOUR APP LOGIC
-// The #[hyperprocess] attribute goes HERE, before the impl block
-#[hyperprocess(
+
+// The hyperapp_macro provides:
+// - Async/await support (custom runtime)
+// - Automatic WIT (WebAssembly Interface Types) generation
+// - State persistence
+// - HTTP/WebSocket bindings
+#[hyperapp_macro::hyperapp(
     name = "HyperappSkeleton App",
     ui = Some(hyperware_process_lib::http::server::HttpBindingConfig::default()),
     endpoints = vec![
@@ -58,16 +55,16 @@ impl AppState {
         // Add your app to the Hyperware homepage
         // Parameters: name, icon, path, widget
         add_to_homepage("HyperappSkeleton App", Some(ICON), Some("/"), None);
-        
+
         // Initialize your app state
         self.counter = 0;
         self.messages.push("App initialized!".to_string());
-        
+
         // Get our node identity (useful for P2P apps)
         let our_node = our().node.clone();
         println!("HyperappSkeleton app initialized on node: {}", our_node);
     }
-    
+
     // HTTP ENDPOINT EXAMPLE
     #[local]
     #[http]
@@ -78,7 +75,7 @@ impl AppState {
             node: our().node.clone(),
         })
     }
-    
+
     // HTTP ENDPOINT WITH PARAMETERS
     // Frontend sends parameters as either:
     // - Single value: { "MethodName": value }
@@ -92,23 +89,23 @@ impl AppState {
 
         Ok(self.counter)
     }
-    
+
     // HTTP ENDPOINT RETURNING COMPLEX DATA
     // For complex types, return as JSON string to avoid WIT limitations
     #[local]
     #[http]
     async fn get_messages(&self) -> Result<Vec<String>, String> {
         Ok(self.messages.clone())
-    }    
+    }
 }
 
 
 // WIT TYPE COMPATIBILITY NOTES:
-// The hyperprocess macro generates WebAssembly Interface Types from your code.
+// The hyperapp macro generates WebAssembly Interface Types from your code.
 // Supported types:
 // ✅ Primitives: bool, u8-u64, i8-i64, f32, f64, String
 // ✅ Vec<T> where T is supported
-// ✅ Option<T> where T is supported  
+// ✅ Option<T> where T is supported
 // ✅ Simple structs with public fields
 // ❌ HashMap - use Vec<(K,V)> instead
 // ❌ Fixed arrays [T; N] - use Vec<T>
