@@ -7,7 +7,12 @@ use color_eyre::{
     eyre::{bail, eyre, WrapErr},
     Result,
 };
-use syn::{self, Attribute, ImplItem, Item, Type};
+use syn::{
+    self,
+    parse::{Parse, ParseStream},
+    punctuated::Punctuated,
+    Attribute, Ident, ImplItem, Item, LitStr, Token, Type,
+};
 use toml::Value;
 use tracing::{debug, info, instrument, warn};
 use walkdir::WalkDir;
@@ -93,6 +98,24 @@ fn to_wit_ident(kebab_name: &str) -> String {
     }
 }
 
+// Convert kebab-case to PascalCase
+fn to_pascal_case(s: &str) -> String {
+    s.split('-')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().chain(chars).collect(),
+            }
+        })
+        .collect()
+}
+
+// Convert kebab-case to snake_case
+fn kebab_to_snake_case(s: &str) -> String {
+    s.replace('-', "_")
+}
+
 // Validates a name doesn't contain numbers or "stream"
 fn validate_name(name: &str, kind: &str) -> Result<()> {
     // Check for numbers
@@ -150,11 +173,23 @@ fn remove_state_suffix(name: &str) -> String {
     name.to_string()
 }
 
-// Extract wit_world from the #[hyperprocess] attribute using the format in the debug representation
+/// Check if an attribute path refers to the hyperapp attribute.
+/// Matches both `#[hyperapp]` and `#[hyperapp_macro::hyperapp]`.
+fn is_hyperapp_attr(attr: &Attribute) -> bool {
+    let path = attr.path();
+    if path.is_ident("hyperapp") {
+        return true;
+    }
+    // Check for hyperapp_macro::hyperapp
+    let segments: Vec<_> = path.segments.iter().collect();
+    segments.len() == 2 && segments[0].ident == "hyperapp_macro" && segments[1].ident == "hyperapp"
+}
+
+// Extract wit_world from the #[hyperapp] attribute using the format in the debug representation
 #[instrument(level = "trace", skip_all)]
 fn extract_wit_world(attrs: &[Attribute]) -> Result<String> {
     for attr in attrs {
-        if attr.path().is_ident("hyperprocess") {
+        if is_hyperapp_attr(attr) {
             // Convert attribute to string representation
             let attr_str = format!("{:?}", attr);
             debug!(attr_str = %attr_str, "Attribute string");
@@ -178,7 +213,7 @@ fn extract_wit_world(attrs: &[Attribute]) -> Result<String> {
             }
         }
     }
-    bail!("wit_world not found in hyperprocess attribute")
+    bail!("wit_world not found in hyperapp attribute")
 }
 // Helper function to check if a WIT type name is a primitive or known built-in
 fn is_wit_primitive_or_builtin(type_name: &str) -> bool {
@@ -224,6 +259,10 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                 "u32" => Ok("u32".to_string()),
                 "i64" => Ok("s64".to_string()),
                 "u64" => Ok("u64".to_string()),
+                // WIT 1.0 does not support 128-bit integers. Represent these as strings
+                // to preserve full precision across language boundaries.
+                "i128" => Ok("string".to_string()),
+                "u128" => Ok("string".to_string()),
                 "f32" => Ok("f32".to_string()),
                 "f64" => Ok("f64".to_string()),
                 "usize" => Ok("u64".to_string()),
@@ -308,31 +347,47 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                         Err(eyre!("Failed to parse Result type arguments"))
                     }
                 }
-                // TODO: fix and enable
-                //"HashMap" | "BTreeMap" => {
-                //    if let syn::PathArguments::AngleBracketed(args) =
-                //        &type_path.path.segments.last().unwrap().arguments
-                //    {
-                //        if args.args.len() >= 2 {
-                //            if let (
-                //                Some(syn::GenericArgument::Type(key_ty)),
-                //                Some(syn::GenericArgument::Type(val_ty)),
-                //            ) = (args.args.first(), args.args.get(1))
-                //            {
-                //                let key_type = rust_type_to_wit(key_ty, used_types)?;
-                //                let val_type = rust_type_to_wit(val_ty, used_types)?;
-                //                // For HashMaps, we'll generate a list of tuples where each tuple contains a key and value
-                //                Ok(format!("list<tuple<{}, {}>>", key_type, val_type))
-                //            } else {
-                //                Ok("list<tuple<string, any>>".to_string())
-                //            }
-                //        } else {
-                //            Ok("list<tuple<string, any>>".to_string())
-                //        }
-                //    } else {
-                //        Ok("list<tuple<string, any>>".to_string())
-                //    }
-                //}
+                "HashMap" | "BTreeMap" => {
+                    if let syn::PathArguments::AngleBracketed(args) =
+                        &type_path.path.segments.last().unwrap().arguments
+                    {
+                        if args.args.len() >= 2 {
+                            if let (
+                                Some(syn::GenericArgument::Type(key_ty)),
+                                Some(syn::GenericArgument::Type(val_ty)),
+                            ) = (args.args.first(), args.args.get(1))
+                            {
+                                let key_type = rust_type_to_wit(key_ty, used_types)?;
+                                let val_type = rust_type_to_wit(val_ty, used_types)?;
+                                // Defer alias/string validation to later verification.
+                                // Generate a tuple-backed representation using the key type name
+                                // (which may be an alias like `node-id`) and let the alias
+                                // definition resolve to `string`.
+                                Ok(format!("list<tuple<{}, {}>>", key_type, val_type))
+                            } else {
+                                bail!("Failed to parse HashMap generic arguments");
+                            }
+                        } else {
+                            bail!("HashMap requires two generic arguments <K, V>");
+                        }
+                    } else {
+                        bail!("Failed to parse HashMap generic arguments");
+                    }
+                }
+                "HashSet" | "BTreeSet" => {
+                    if let syn::PathArguments::AngleBracketed(args) =
+                        &type_path.path.segments.last().unwrap().arguments
+                    {
+                        if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                            let inner = rust_type_to_wit(inner_ty, used_types)?;
+                            Ok(format!("list<{}>", inner))
+                        } else {
+                            bail!("Failed to parse HashSet inner type");
+                        }
+                    } else {
+                        bail!("Failed to parse HashSet inner type");
+                    }
+                }
                 custom => {
                     // Validate custom type name
                     validate_name(custom, "Type")?;
@@ -465,10 +520,17 @@ fn generate_signature_struct(
 
     // For HTTP endpoints, try to extract method and path from attribute
     if attr_type == "http" {
-        if let Some((http_method, http_path)) = extract_http_info(&method.attrs)? {
-            comment.push_str(&format!("\n    // HTTP: {} {}", http_method, http_path));
+        if let Some(info) = extract_http_info(&method.attrs)? {
+            let method_comment = info.method.unwrap_or_else(|| "POST".to_string());
+            let mut path_comment = info.path.unwrap_or_else(|| format!("/api/{}", kebab_name));
+            if !path_comment.starts_with('/') {
+                path_comment = format!("/{}", path_comment.trim_start_matches('/'));
+            }
+            comment.push_str(&format!(
+                "\n    // HTTP: {} {}",
+                method_comment, path_comment
+            ));
         } else {
-            // Default path if not specified
             comment.push_str(&format!("\n    // HTTP: POST /api/{}", kebab_name));
         }
     }
@@ -484,7 +546,10 @@ fn generate_signature_struct(
         struct_fields.push("        target: address".to_string());
     }
 
-    // Process function parameters (skip &self and &mut self)
+    // Collect function parameters (skip &self and &mut self) into a tuple
+    // This preserves ordering for LLM consumption (JSON objects don't guarantee order)
+    let mut param_names_and_types: Vec<(String, String)> = Vec::new();
+
     for arg in &method.sig.inputs {
         if let syn::FnArg::Typed(pat_type) = arg {
             if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
@@ -495,35 +560,79 @@ fn generate_signature_struct(
 
                 // Get original param name
                 let param_orig_name = pat_ident.ident.to_string();
-                let _method_name_for_error = method.sig.ident.to_string(); // Get method name for error messages
 
                 // Validate parameter name
                 match validate_name(&param_orig_name, "Parameter") {
                     Ok(_) => {
                         let stripped_param_name =
-                            check_and_strip_leading_underscore(param_orig_name.clone()); // Clone needed
+                            check_and_strip_leading_underscore(param_orig_name.clone());
                         let param_name = to_kebab_case(&stripped_param_name);
                         let param_wit_ident = to_wit_ident(&param_name);
 
                         // Rust type to WIT type
                         match rust_type_to_wit(&pat_type.ty, used_types) {
                             Ok(param_type) => {
-                                // Add field directly to the struct
-                                struct_fields
-                                    .push(format!("        {}: {}", param_wit_ident, param_type));
+                                param_names_and_types.push((param_wit_ident, param_type));
                             }
                             Err(e) => {
-                                // Return error, preserving the helpful validation message if present
                                 return Err(e);
                             }
                         }
                     }
                     Err(e) => {
-                        // Return the error directly
                         return Err(e);
                     }
                 }
             }
+        }
+    }
+
+    // Generate arg-types tuple to preserve ordering for LLM consumption
+    // The args comment goes above the record to document the full signature with names
+    if !param_names_and_types.is_empty() {
+        let args_doc: Vec<String> = param_names_and_types
+            .iter()
+            .map(|(name, ty)| format!("{}: {}", name, ty))
+            .collect();
+
+        let tuple_types: Vec<&str> = param_names_and_types
+            .iter()
+            .map(|(_, ty)| ty.as_str())
+            .collect();
+
+        // Add args comment above the record (appended to the function comment)
+        comment.push_str(&format!("\n    // args: ({})", args_doc.join(", ")));
+
+        // Add JSON format comment for local and remote endpoints
+        if attr_type == "local" || attr_type == "remote" {
+            let pascal_name = to_pascal_case(kebab_name);
+            let snake_params: Vec<String> = param_names_and_types
+                .iter()
+                .map(|(name, _)| kebab_to_snake_case(name))
+                .collect();
+            // Single arg: no array brackets, multiple args: use array
+            let args_fmt = if snake_params.len() == 1 {
+                snake_params[0].clone()
+            } else {
+                format!("[{}]", snake_params.join(", "))
+            };
+            comment.push_str(&format!(
+                "\n    // json fmt: {{\"{}\": {}}}",
+                pascal_name, args_fmt
+            ));
+        }
+
+        struct_fields.push(format!(
+            "        arg-types: tuple<{}>",
+            tuple_types.join(", ")
+        ));
+    } else {
+        comment.push_str("\n    // args: none");
+
+        // Add JSON format comment for local and remote endpoints with no args
+        if attr_type == "local" || attr_type == "remote" {
+            let pascal_name = to_pascal_case(kebab_name);
+            comment.push_str(&format!("\n    // json fmt: {{\"{}\": null}}", pascal_name));
         }
     }
 
@@ -574,52 +683,67 @@ fn generate_signature_struct(
     Ok(record_def)
 }
 
+#[derive(Default, Debug, Clone)]
+struct HttpAttrInfo {
+    method: Option<String>,
+    path: Option<String>,
+}
+
+struct HttpKeyValue {
+    key: Ident,
+    _eq_token: Token![=],
+    value: LitStr,
+}
+
+impl Parse for HttpKeyValue {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        Ok(Self {
+            key: input.parse()?,
+            _eq_token: input.parse()?,
+            value: input.parse()?,
+        })
+    }
+}
+
 // Helper function to extract HTTP method and path from [http] attribute
 #[instrument(level = "trace", skip_all)]
-fn extract_http_info(attrs: &[Attribute]) -> Result<Option<(String, String)>> {
+fn extract_http_info(attrs: &[Attribute]) -> Result<Option<HttpAttrInfo>> {
     for attr in attrs {
         if attr.path().is_ident("http") {
-            // Convert attribute to string representation for parsing
-            let attr_str = format!("{:?}", attr);
-            debug!(attr_str = %attr_str, "HTTP attribute string");
+            match &attr.meta {
+                syn::Meta::Path(_) => {
+                    return Ok(Some(HttpAttrInfo::default()));
+                }
+                syn::Meta::List(list) => {
+                    let parser = Punctuated::<HttpKeyValue, Token![,]>::parse_terminated;
+                    let parsed = list.parse_args_with(parser);
 
-            let mut method = None;
-            let mut path = None;
-
-            // Look for method parameter
-            if let Some(method_pos) = attr_str.find("method") {
-                if let Some(eq_pos) = attr_str[method_pos..].find('=') {
-                    let start_pos = method_pos + eq_pos + 1;
-                    // Find the quoted value
-                    if let Some(quote_start) = attr_str[start_pos..].find('"') {
-                        let value_start = start_pos + quote_start + 1;
-                        if let Some(quote_end) = attr_str[value_start..].find('"') {
-                            method =
-                                Some(attr_str[value_start..value_start + quote_end].to_string());
+                    match parsed {
+                        Ok(args) => {
+                            let mut info = HttpAttrInfo::default();
+                            for kv in args {
+                                let key = kv.key.to_string();
+                                let value = kv.value.value();
+                                match key.as_str() {
+                                    "method" => info.method = Some(value.to_uppercase()),
+                                    "path" => info.path = Some(value),
+                                    other => {
+                                        warn!(key = %other, "Unknown parameter in #[http] attribute")
+                                    }
+                                }
+                            }
+                            return Ok(Some(info));
+                        }
+                        Err(err) => {
+                            return Err(err)
+                                .wrap_err("Failed to parse #[http] attribute arguments");
                         }
                     }
                 }
-            }
-
-            // Look for path parameter
-            if let Some(path_pos) = attr_str.find("path") {
-                if let Some(eq_pos) = attr_str[path_pos..].find('=') {
-                    let start_pos = path_pos + eq_pos + 1;
-                    // Find the quoted value
-                    if let Some(quote_start) = attr_str[start_pos..].find('"') {
-                        let value_start = start_pos + quote_start + 1;
-                        if let Some(quote_end) = attr_str[value_start..].find('"') {
-                            path = Some(attr_str[value_start..value_start + quote_end].to_string());
-                        }
-                    }
+                syn::Meta::NameValue(_) => {
+                    warn!("Unexpected name-value form for #[http] attribute");
+                    return Ok(Some(HttpAttrInfo::default()));
                 }
-            }
-
-            // If we found at least one parameter, return the info
-            if method.is_some() || path.is_some() {
-                let final_method = method.unwrap_or_else(|| "POST".to_string());
-                let final_path = path.unwrap_or_else(|| "/api".to_string());
-                return Ok(Some((final_method, final_path)));
             }
         }
     }
@@ -693,6 +817,23 @@ fn collect_single_type_definition(
                 return generate_enum_wit_definition(e, &name, &kebab_name, &mut dependencies)
                     .map(|wit_def| Some((wit_def, dependencies)));
             }
+            Item::Type(t) => {
+                let alias_name = t.ident.to_string();
+                // Skip internal types
+                if alias_name.contains("__") {
+                    continue;
+                }
+
+                let kebab_name = to_kebab_case(&alias_name);
+                if kebab_name != target_type_kebab {
+                    continue;
+                }
+
+                // Build alias: type <kebab> = <rhs>
+                let rhs = rust_type_to_wit(&t.ty, &mut dependencies)?;
+                let def = format!("type {} = {};", to_wit_ident(&kebab_name), rhs);
+                return Ok(Some((def, dependencies)));
+            }
             _ => {}
         }
     }
@@ -738,13 +879,24 @@ fn generate_struct_wit_definition(
             }
             Ok(field_strings)
         }
-        syn::Fields::Unnamed(_) => {
-            bail!(
-                "Struct '{}' has unnamed (tuple-style) fields, which are not supported in WIT. \
-                 WIT only supports named fields in records. \
-                 Consider converting to a struct with named fields.",
-                name
-            );
+        syn::Fields::Unnamed(fields) => {
+            // Support 1-tuple (newtype) structs by emitting a WIT type alias.
+            if fields.unnamed.len() == 1 {
+                let inner = &fields.unnamed[0];
+                let wit_type = rust_type_to_wit(&inner.ty, dependencies)?;
+                return Ok(format!(
+                    "type {} = {};",
+                    to_wit_ident(&kebab_name),
+                    wit_type
+                ));
+            } else {
+                bail!(
+                    "Struct '{}' has {} unnamed (tuple-style) fields, which are not supported in WIT. \
+                     Only newtype (single-field) tuple structs are supported as type aliases.",
+                    name,
+                    fields.unnamed.len()
+                );
+            }
         }
         syn::Fields::Unit => {
             // Unit struct becomes an empty record
@@ -1079,20 +1231,16 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     let mut wit_world = None;
     let mut interface_name = None; // Original Rust name (e.g., MyProcessState)
     let mut kebab_interface_name = None; // Kebab-case name (e.g., my-process)
-    let mut impl_item_with_hyperprocess = None;
+    let mut impl_item_with_hyperapp = None;
 
-    debug!("Scanning lib.rs for impl block with #[hyperprocess] attribute");
+    debug!("Scanning lib.rs for impl block with #[hyperapp] attribute");
     for item in &ast.items {
         if let Item::Impl(impl_item) = item {
-            if let Some(attr) = impl_item
-                .attrs
-                .iter()
-                .find(|a| a.path().is_ident("hyperprocess"))
-            {
-                debug!("Found #[hyperprocess] attribute");
+            if let Some(attr) = impl_item.attrs.iter().find(|a| is_hyperapp_attr(a)) {
+                debug!("Found #[hyperapp] attribute");
                 // Attempt to extract wit_world. Propagate error if extraction fails.
                 let world_name = extract_wit_world(&[attr.clone()])
-                    .wrap_err("Failed to extract wit_world from #[hyperprocess] attribute")?;
+                    .wrap_err("Failed to extract wit_world from #[hyperapp] attribute")?;
                 debug!(wit_world = %world_name, "Extracted wit_world");
                 wit_world = Some(world_name);
 
@@ -1110,30 +1258,33 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                             let base_name = remove_state_suffix(name);
                             kebab_interface_name = Some(to_kebab_case(&base_name));
                             debug!(interface_name = %name, base_name = %base_name, kebab_name = ?kebab_interface_name, "Interface details");
-                            impl_item_with_hyperprocess = Some(impl_item.clone());
+                            impl_item_with_hyperapp = Some(impl_item.clone());
                             break; // Found the target impl block
                         }
                         Err(e) => {
                             // Escalate errors for invalid interface names instead of just warning
                             return Err(e.wrap_err(format!(
-                                "Invalid interface name '{}' in hyperprocess impl block",
+                                "Invalid interface name '{}' in hyperapp impl block",
                                 name
                             )));
                         }
                     }
                 } else {
                     // If interface name couldn't be extracted, it's an error for this project.
-                    bail!("Could not extract interface name from #[hyperprocess] impl block type: {:?}", impl_item.self_ty);
+                    bail!(
+                        "Could not extract interface name from #[hyperapp] impl block type: {:?}",
+                        impl_item.self_ty
+                    );
                 }
             }
         }
     }
 
-    // Exit early if no valid hyperprocess impl block was identified
-    let Some(ref impl_item) = impl_item_with_hyperprocess else {
+    // Exit early if no valid hyperapp impl block was identified
+    let Some(ref impl_item) = impl_item_with_hyperapp else {
         // If we looped through everything and didn't find a block (and didn't error above),
-        // it means no #[hyperprocess] attribute was found at all. This is okay, just skip.
-        warn!(project_path=%project_path.display(), "No #[hyperprocess] impl block found in lib.rs, skipping project");
+        // it means no #[hyperapp] attribute was found at all. This is okay, just skip.
+        warn!(project_path=%project_path.display(), "No #[hyperapp] impl block found in lib.rs, skipping project");
         return Ok(None);
     };
     // These unwraps are safe due to the checks above ensuring we error or break successfully
@@ -1144,7 +1295,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     let mut signature_structs = Vec::new(); // Stores WIT string for each signature record
     let mut global_used_types = HashSet::new(); // All custom WIT types encountered (kebab-case)
 
-    debug!("Pass 2: Analyzing functions in hyperprocess impl block");
+    debug!("Pass 2: Analyzing functions in hyperapp impl block");
     for item in &impl_item.items {
         if let ImplItem::Fn(method) = item {
             let method_name = method.sig.ident.to_string();
@@ -1215,9 +1366,9 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     signature_structs.push(sig_struct);
                 }
             } else {
-                // Method in hyperprocess impl lacks required attribute - Error
+                // Method in hyperapp impl lacks required attribute - Error
                 return Err(eyre!(
-                         "Method '{}' in the #[hyperprocess] impl block is missing a required attribute ([remote], [local], [http], [init], [ws], [ws_client] or [eth]). Only methods with these attributes should be included.",
+                         "Method '{}' in the #[hyperapp] impl block is missing a required attribute ([remote], [local], [http], [init], [ws], [ws_client] or [eth]). Only methods with these attributes should be included.",
                          method_name
                      ));
             }
@@ -1236,6 +1387,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         .cloned()
         .collect::<HashSet<String>>();
     let mut collected_types = HashSet::new();
+    // Track every custom type referenced directly or via dependencies
+    let mut transitively_used_types: HashSet<String> = HashSet::new();
 
     // Iteratively collect type definitions and their dependencies
     while !types_to_collect.is_empty() {
@@ -1258,6 +1411,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
                         // Add dependencies to be collected
                         for dep in dependencies {
+                            transitively_used_types.insert(dep.clone());
                             if !is_wit_primitive_or_builtin(&dep) && !collected_types.contains(&dep)
                             {
                                 types_to_collect.insert(dep);
@@ -1284,6 +1438,22 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     }
 
     debug!(collected_count = %all_type_definitions.len(), "Collected type definitions in Pass 3");
+
+    // Merge direct and transitive used type sets for alias inference and verification
+    let mut all_used_types: HashSet<String> = global_used_types.clone();
+    all_used_types.extend(transitively_used_types.into_iter());
+
+    // Minimal inference: only add alias for `value` when used.
+    let mut inferred_aliases: Vec<String> = Vec::new();
+    let mut inferred_types: HashSet<String> = HashSet::new();
+    if all_used_types.contains("value") && !all_type_definitions.contains_key("value") {
+        inferred_aliases.push(
+            "// Arbitrary JSON value; encoded as string for WIT 1.0 (TS: unknown, Rust: serde_json::Value)"
+                .to_string(),
+        );
+        inferred_aliases.push(format!("type {} = string;", to_wit_ident("value")));
+        inferred_types.insert("value".to_string());
+    }
 
     // --- 4. Build dependency graph and topologically sort types ---
     debug!("Pass 4: Building type dependency graph");
@@ -1387,9 +1557,10 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     // --- 5. Verify All Used Types Have Definitions ---
     debug!(final_used_types = ?global_used_types, available_definitions = ?all_type_definitions.keys(), "Starting final verification");
     let mut undefined_types = Vec::new();
-    for used_type_name in &global_used_types {
+    for used_type_name in &all_used_types {
         if !is_wit_primitive_or_builtin(used_type_name)
             && !all_type_definitions.contains_key(used_type_name)
+            && !inferred_types.contains(used_type_name)
         {
             warn!(type_name=%used_type_name, "Verification failed: Used type has no generated definition.");
             undefined_types.push(used_type_name.clone());
@@ -1437,6 +1608,16 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
         // Add standard imports (can be refined based on actual needs)
         content.push_str("    use standard.{address};\n"); // Assuming world includes 'standard'
+
+        // Add inferred aliases (if any)
+        if !inferred_aliases.is_empty() {
+            content.push('\n');
+            for line in &inferred_aliases {
+                content.push_str("    ");
+                content.push_str(line);
+                content.push('\n');
+            }
+        }
 
         // Add type definitions with proper indentation
         if !relevant_defs.is_empty() {
@@ -1610,7 +1791,7 @@ mod tests {
 
         // Create a lib.rs with a handler that uses SimpleStruct but not UnusedStruct
         let lib_content = r#"
-use hyperware_macros::hyperprocess;
+use hyperware_macros::hyperapp;
 
 pub struct SimpleStruct {
     pub name: String,
@@ -1625,7 +1806,7 @@ pub enum UnusedEnum {
 
 pub struct ProcessState;
 
-#[hyperprocess(wit_world = "test-world")]
+#[hyperapp(wit_world = "test-world")]
 impl ProcessState {
     #[remote]
     pub fn handler(&self, input: SimpleStruct) -> Result<String, String> {
@@ -1711,7 +1892,7 @@ package = "test:component"
 
         // Create a lib.rs with nested type dependencies
         let lib_content = r#"
-use hyperware_macros::hyperprocess;
+use hyperware_macros::hyperapp;
 
 pub struct LevelOne {
     pub data: LevelTwo,
@@ -1731,7 +1912,7 @@ pub struct UnusedDeep {
 
 pub struct ProcessState;
 
-#[hyperprocess(wit_world = "test-world")]
+#[hyperapp(wit_world = "test-world")]
 impl ProcessState {
     #[remote]
     pub fn handler(&self, input: LevelOne) -> Result<(), String> {
@@ -1813,7 +1994,7 @@ package = "test:component"
 
         // Create a lib.rs with a handler that uses an incompatible enum
         let lib_content = r#"
-use hyperware_macros::hyperprocess;
+use hyperware_macros::hyperapp;
 
 pub enum BadEnum {
     Variant { name: String, count: u32 },  // Struct-like variant - should fail
@@ -1821,7 +2002,7 @@ pub enum BadEnum {
 
 pub struct ProcessState;
 
-#[hyperprocess(wit_world = "test-world")]
+#[hyperapp(wit_world = "test-world")]
 impl ProcessState {
     #[remote]
     pub fn handler(&self, input: BadEnum) -> Result<(), String> {
@@ -1874,7 +2055,7 @@ package = "test:component"
 
         // Create a lib.rs with a struct that has fields with numbers
         let lib_content = r#"
-use hyperware_macros::hyperprocess;
+use hyperware_macros::hyperapp;
 
 pub struct TestStruct {
     pub field1: String,  // This will trigger the error
@@ -1883,7 +2064,7 @@ pub struct TestStruct {
 
 pub struct ProcessState;
 
-#[hyperprocess(wit_world = "test-world")]
+#[hyperapp(wit_world = "test-world")]
 impl ProcessState {
     #[remote]
     pub fn handler(&self, input: TestStruct) -> Result<(), String> {
@@ -1950,7 +2131,7 @@ package = "test:component"
 
         // Create a lib.rs with a struct that has 'stream' in the name
         let lib_content = r#"
-use hyperware_macros::hyperprocess;
+use hyperware_macros::hyperapp;
 
 pub struct DataStream {  // This will trigger the error
     pub data: String,
@@ -1958,7 +2139,7 @@ pub struct DataStream {  // This will trigger the error
 
 pub struct ProcessState;
 
-#[hyperprocess(wit_world = "test-world")]
+#[hyperapp(wit_world = "test-world")]
 impl ProcessState {
     #[remote]
     pub fn handler(&self, input: DataStream) -> Result<(), String> {
@@ -2103,9 +2284,9 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
                 processed_projects.push(project_path.clone());
                 wit_worlds.insert(wit_world);
             }
-            // Project was skipped intentionally (e.g., no lib.rs, no #[hyperprocess])
+            // Project was skipped intentionally (e.g., no lib.rs, no #[hyperapp])
             Ok(None) => {
-                debug!(project = %project_path.display(), "Project skipped during processing (e.g., no lib.rs or #[hyperprocess] found)");
+                debug!(project = %project_path.display(), "Project skipped during processing (e.g., no lib.rs or #[hyperapp] found)");
                 // Continue to the next project
                 continue;
             }

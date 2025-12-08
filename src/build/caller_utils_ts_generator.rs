@@ -49,6 +49,17 @@ pub fn to_pascal_case(s: &str) -> String {
     result
 }
 
+// Convert kebab-case to camelCase
+pub fn to_camel_case(s: &str) -> String {
+    let pascal = to_pascal_case(s);
+    if pascal.is_empty() {
+        return pascal;
+    }
+    let mut chars = pascal.chars();
+    let first = chars.next().unwrap().to_lowercase().next().unwrap();
+    std::iter::once(first).chain(chars).collect()
+}
+
 // Extract hyperapp name from WIT filename
 fn extract_hyperapp_name(wit_file_path: &Path) -> Option<String> {
     wit_file_path
@@ -225,12 +236,111 @@ struct SignatureField {
     wit_type: String,
 }
 
+/// Parse a tuple type string like "tuple<u64, bool>" into its element types
+fn parse_tuple_types(tuple_type: &str) -> Vec<String> {
+    if !tuple_type.starts_with("tuple<") || !tuple_type.ends_with(">") {
+        return vec![];
+    }
+    let inner = &tuple_type[6..tuple_type.len() - 1];
+    if inner.is_empty() {
+        return vec![];
+    }
+    // Handle nested generics by tracking angle bracket depth
+    let mut types = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0;
+
+    for c in inner.chars() {
+        match c {
+            '<' => {
+                depth += 1;
+                current.push(c);
+            }
+            '>' => {
+                depth -= 1;
+                current.push(c);
+            }
+            ',' if depth == 0 => {
+                types.push(current.trim().to_string());
+                current = String::new();
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+    if !current.trim().is_empty() {
+        types.push(current.trim().to_string());
+    }
+    types
+}
+
+/// Parse args comment like `// args: (foo: u64, bar: bool)` into parameter names
+fn parse_args_comment(comment: &str) -> Vec<String> {
+    let comment = comment.trim().trim_start_matches("//").trim();
+    if !comment.starts_with("args:") {
+        return vec![];
+    }
+    let args_part = comment.trim_start_matches("args:").trim();
+    if !args_part.starts_with("(") || !args_part.ends_with(")") {
+        return vec![];
+    }
+    let inner = &args_part[1..args_part.len() - 1];
+    if inner.is_empty() {
+        return vec![];
+    }
+
+    let mut names = Vec::new();
+    // Handle nested generics by tracking angle bracket depth
+    let mut current = String::new();
+    let mut depth = 0;
+
+    for c in inner.chars() {
+        match c {
+            '<' => {
+                depth += 1;
+                current.push(c);
+            }
+            '>' => {
+                depth -= 1;
+                current.push(c);
+            }
+            ',' if depth == 0 => {
+                // Extract name from "name: type"
+                if let Some(name) = current.split(':').next() {
+                    let name = name.trim();
+                    if !name.is_empty() {
+                        names.push(name.to_string());
+                    }
+                }
+                current = String::new();
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+    // Handle last parameter
+    if !current.trim().is_empty() {
+        if let Some(name) = current.split(':').next() {
+            let name = name.trim();
+            if !name.is_empty() {
+                names.push(name.to_string());
+            }
+        }
+    }
+    names
+}
+
 // Structure to represent a WIT signature struct
 #[derive(Debug)]
 struct SignatureStruct {
     function_name: String,
     attr_type: String,
     fields: Vec<SignatureField>,
+    http_method: Option<String>,
+    http_path: Option<String>,
+    args_comment: Option<String>, // Parsed from // args: (name: type, ...) comment
 }
 
 // Structure to represent a WIT record
@@ -267,6 +377,7 @@ struct WitTypes {
     records: Vec<WitRecord>,
     variants: Vec<WitVariant>,
     enums: Vec<WitEnum>,
+    aliases: Vec<(String, String)>,
 }
 
 // Structure to hold types grouped by hyperapp
@@ -276,6 +387,7 @@ struct HyperappTypes {
     records: Vec<WitRecord>,
     variants: Vec<WitVariant>,
     enums: Vec<WitEnum>,
+    aliases: Vec<(String, String)>,
 }
 
 // Parse WIT file to extract function signatures, records, and variants
@@ -290,16 +402,40 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
     let mut records = Vec::new();
     let mut variants = Vec::new();
     let mut enums = Vec::new();
+    let mut aliases = Vec::new();
 
     // Simple parser for WIT files to extract record definitions
     let lines: Vec<_> = content.lines().collect();
     let mut i = 0;
+    let mut pending_args_comment: Option<String> = None;
 
     while i < lines.len() {
         let line = lines[i].trim();
 
+        // Look for args comment above record: // args: (name: type, ...)
+        if line.starts_with("// args:") {
+            pending_args_comment = Some(line.to_string());
+            debug!(args_comment = %line, "Found args comment");
+            i += 1;
+            continue;
+        }
+
+        // Look for type aliases
+        if line.starts_with("type ") {
+            // Expect: type name = rhs
+            let rest = line
+                .trim_start_matches("type ")
+                .trim_end_matches(';')
+                .trim();
+            if let Some(eq_pos) = rest.find('=') {
+                let name = strip_wit_escape(rest[..eq_pos].trim()).to_string();
+                let rhs = rest[eq_pos + 1..].trim().to_string();
+                debug!(alias = %name, rhs = %rhs, "Found alias");
+                aliases.push((name, rhs));
+            }
+        }
         // Look for record definitions
-        if line.starts_with("record ") {
+        else if line.starts_with("record ") {
             let record_name = line
                 .trim_start_matches("record ")
                 .trim_end_matches(" {")
@@ -323,6 +459,40 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                 let function_name = parts[0].to_string();
                 let attr_type = parts[1].to_string();
                 debug!(function = %function_name, attr_type = %attr_type, "Extracted function name and type");
+
+                let mut http_method = None;
+                let mut http_path = None;
+
+                // scan backward/upward to get method/path from a // HTTP: comment
+                if attr_type == "http" {
+                    let mut j = i;
+                    while j > 0 {
+                        let prev_line = lines[j - 1].trim();
+                        if prev_line.is_empty() {
+                            j -= 1;
+                            continue;
+                        }
+                        if prev_line.starts_with("// HTTP:") {
+                            let rest = prev_line.trim_start_matches("// HTTP:").trim();
+                            let tokens: Vec<&str> = rest.split_whitespace().collect();
+                            if let Some(method_token) = tokens.first() {
+                                http_method = Some(method_token.to_uppercase());
+                            }
+                            if let Some(path_token) = tokens.get(1) {
+                                http_path = Some(path_token.to_string());
+                            }
+                            break;
+                        } else if prev_line.starts_with("//") {
+                            j -= 1;
+                            continue;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                // Use the pending args comment if present
+                let args_comment = pending_args_comment.take();
 
                 // Parse fields
                 let mut fields = Vec::new();
@@ -357,6 +527,9 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
                     function_name,
                     attr_type,
                     fields,
+                    http_method,
+                    http_path,
+                    args_comment,
                 });
             } else {
                 // This is a regular record
@@ -502,6 +675,7 @@ fn parse_wit_file(file_path: &Path) -> Result<WitTypes> {
         records,
         variants,
         enums,
+        aliases,
     })
 }
 
@@ -630,16 +804,40 @@ fn generate_typescript_function(
 
     debug!(name = %camel_function_name, "Generating TypeScript function");
 
+    // Extract arg names from the args comment if present
+    let arg_names: Vec<String> = signature
+        .args_comment
+        .as_ref()
+        .map(|c| {
+            parse_args_comment(c)
+                .into_iter()
+                .map(|n| to_camel_case(&n))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !arg_names.is_empty() {
+        debug!(arg_names = ?arg_names, "Parsed arg names from comment");
+    }
+
     // Extract parameters and return type
     let mut params = Vec::new();
     let mut param_names = Vec::new();
     let mut param_types = Vec::new();
     let mut full_return_type = "void".to_string();
     let mut unwrapped_return_type = "void".to_string();
+
+    let http_method = signature
+        .http_method
+        .clone()
+        .unwrap_or_else(|| "POST".to_string());
+    let http_path = signature
+        .http_path
+        .clone()
+        .unwrap_or_else(|| "/api".to_string());
+
     let actual_param_type: String;
 
     for field in &signature.fields {
-        let field_name_camel = to_snake_case(&field.name);
         let ts_type = wit_type_to_typescript(&field.wit_type);
         debug!(field = %field.name, wit_type = %field.wit_type, ts_type = %ts_type, "Processing field");
 
@@ -655,10 +853,28 @@ fn generate_typescript_function(
                 unwrapped_return_type = ts_type;
             }
             debug!(return_type = %unwrapped_return_type, "Identified return type");
+        } else if field.name == "arg-types" {
+            // Parse the arg-types tuple to extract individual parameter types
+            let tuple_types = parse_tuple_types(&field.wit_type);
+            for (i, wit_type) in tuple_types.iter().enumerate() {
+                // Use actual arg name if available, otherwise fall back to arg0, arg1, etc.
+                let param_name = arg_names
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| format!("arg{}", i));
+                let param_ts_type = wit_type_to_typescript(wit_type);
+                params.push(format!("{}: {}", param_name, param_ts_type));
+                param_names.push(param_name);
+                param_types.push(param_ts_type);
+                debug!(param_name = %param_names.last().unwrap(), wit_type = %wit_type, "Added tuple parameter");
+            }
         } else {
+            // Legacy support: handle individual parameter fields (for backwards compatibility)
+            let field_name_camel = to_snake_case(&field.name);
             params.push(format!("{}: {}", field_name_camel, ts_type));
             param_names.push(field_name_camel);
             param_types.push(ts_type);
+            debug!(param_name = %param_names.last().unwrap(), "Added parameter (legacy)");
         }
     }
 
@@ -708,7 +924,7 @@ fn generate_typescript_function(
 
     // Function returns the unwrapped type since parseResponse extracts it
     let function_impl = format!(
-        "/**\n * {}\n{} * @returns Promise with result\n * @throws ApiError if the request fails\n */\nexport async function {}({}): Promise<{}> {{\n{}\n\n  return await apiRequest<{}, {}>('{}', 'POST', data);\n}}",
+        "/**\n * {}\n{} * @returns Promise with result\n * @throws ApiError if the request fails\n */\nexport async function {}({}): Promise<{}> {{\n{}\n\n  return await apiRequest<{}, {}>('{}', '{}', data);\n}}",
         camel_function_name,
         params.iter().map(|p| format!(" * @param {}", p)).collect::<Vec<_>>().join("\n"),
         camel_function_name,
@@ -717,7 +933,8 @@ fn generate_typescript_function(
         data_construction,
         request_interface_name,
         unwrapped_return_type,  // Pass unwrapped type to apiRequest, not Response type
-        camel_function_name
+        http_path,
+        http_method
     );
 
     // Only return implementations for HTTP endpoints
@@ -807,13 +1024,15 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
 
     ts_content.push_str("/**\n");
     ts_content.push_str(" * Generic API request function\n");
-    ts_content.push_str(" * @param endpoint - API endpoint\n");
+    ts_content.push_str(" * @param path - API endpoint path\n");
     ts_content.push_str(" * @param method - HTTP method (GET, POST, PUT, DELETE, etc.)\n");
     ts_content.push_str(" * @param data - Request data\n");
     ts_content.push_str(" * @returns Promise with parsed response data\n");
     ts_content.push_str(" * @throws ApiError if the request fails or response contains an error\n");
     ts_content.push_str(" */\n");
-    ts_content.push_str("async function apiRequest<T, R>(endpoint: string, method: string, data: T): Promise<R> {\n");
+    ts_content.push_str(
+        "async function apiRequest<T, R>(path: string, method: string, data: T): Promise<R> {\n",
+    );
     ts_content
         .push_str("  const BASE_URL = import.meta.env.BASE_URL || window.location.origin;\n\n");
     ts_content.push_str("  const requestOptions: RequestInit = {\n");
@@ -826,7 +1045,10 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
     ts_content.push_str("  if (method !== 'GET' && method !== 'HEAD') {\n");
     ts_content.push_str("    requestOptions.body = JSON.stringify(data);\n");
     ts_content.push_str("  }\n\n");
-    ts_content.push_str("  const result = await fetch(`${BASE_URL}/api`, requestOptions);\n\n");
+    ts_content.push_str(
+        "  const url = path.startsWith('/') ? `${BASE_URL}${path}` : `${BASE_URL}/${path}`;\n",
+    );
+    ts_content.push_str("  const result = await fetch(url, requestOptions);\n\n");
     ts_content.push_str("  if (!result.ok) {\n");
     ts_content
         .push_str("    throw new ApiError(`HTTP request failed with status: ${result.status}`);\n");
@@ -847,6 +1069,7 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
             records: Vec::new(),
             variants: Vec::new(),
             enums: Vec::new(),
+            aliases: Vec::new(),
         };
 
         // Parse each WIT file for this hyperapp
@@ -925,6 +1148,7 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
 
                     // Collect all types for this hyperapp
                     hyperapp_data.records.extend(wit_types.records);
+                    hyperapp_data.aliases.extend(wit_types.aliases);
                     hyperapp_data.variants.extend(wit_types.variants);
                     hyperapp_data.enums.extend(wit_types.enums);
 
@@ -946,6 +1170,7 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
             || !hyperapp_data.records.is_empty()
             || !hyperapp_data.variants.is_empty()
             || !hyperapp_data.enums.is_empty()
+            || !hyperapp_data.aliases.is_empty()
         {
             hyperapp_types_map.insert(hyperapp_name.clone(), hyperapp_data);
         }
@@ -969,12 +1194,28 @@ pub fn create_typescript_caller_utils(base_dir: &Path, api_dir: &Path) -> Result
         ));
         ts_content.push_str(&format!("export namespace {} {{\n", hyperapp_name));
 
-        // Add custom types (records, variants, and enums) for this hyperapp
-        if !hyperapp_data.records.is_empty()
+        // Add custom types (aliases, records, variants, and enums) for this hyperapp
+        if !hyperapp_data.aliases.is_empty()
+            || !hyperapp_data.records.is_empty()
             || !hyperapp_data.variants.is_empty()
             || !hyperapp_data.enums.is_empty()
         {
             ts_content.push_str("\n  // Custom Types\n");
+
+            // Generate type aliases first so downstream types can reference them
+            for (alias_name, rhs) in &hyperapp_data.aliases {
+                let ts_alias = to_pascal_case(alias_name);
+                // Special-case: map WIT alias `value` to TS `unknown` for ergonomic JSON usage
+                let rhs_ts = if alias_name == "value" {
+                    "unknown".to_string()
+                } else {
+                    wit_type_to_typescript(rhs)
+                };
+                ts_content.push_str(&format!("  export type {} = {}\n", ts_alias, rhs_ts));
+            }
+            if !hyperapp_data.aliases.is_empty() {
+                ts_content.push_str("\n");
+            }
 
             // Generate enums first
             for enum_def in &hyperapp_data.enums {

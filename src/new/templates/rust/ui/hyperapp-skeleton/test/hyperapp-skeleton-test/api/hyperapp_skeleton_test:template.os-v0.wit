@@ -1,0 +1,5 @@
+world hyperapp-skeleton-test-template-dot-os-v0 {
+    import app;
+    import tester;
+    include process-v1;
+}

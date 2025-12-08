@@ -306,6 +306,18 @@ async fn build_packages(
         .map(|p| test_dir_path.join(p).canonicalize().unwrap())
         .collect();
 
+    let feature_string = test
+        .features
+        .as_ref()
+        .map(|features| {
+            if features.is_empty() {
+                "test".to_string()
+            } else {
+                features.join(",")
+            }
+        })
+        .unwrap_or_else(|| "test".to_string());
+
     info!("Starting node to host dependencies...");
     let port = test.nodes[0].port.clone();
     let home = PathBuf::from("/tmp/hyperware-fake-node");
@@ -371,7 +383,7 @@ async fn build_packages(
             &HashSet::new(),
             &HashSet::new(),
             false,
-            "test",
+            feature_string.as_str(),
             Some(url.clone()),
             None,
             None,
@@ -398,7 +410,7 @@ async fn build_packages(
             &HashSet::new(),
             &HashSet::new(),
             false,
-            "test",
+            feature_string.as_str(),
             Some(url.clone()),
             None,
             None,
@@ -422,7 +434,7 @@ async fn build_packages(
             &HashSet::new(),
             &HashSet::new(),
             false,
-            "test",
+            feature_string.as_str(),
             Some(url.clone()),
             None,
             None,
