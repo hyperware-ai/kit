@@ -1466,6 +1466,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         .filter(|ty| !is_wit_primitive_or_builtin(ty))
         .cloned()
         .collect();
+    to_process.sort();
 
     // First pass: collect all needed types and their dependencies
     while let Some(type_name) = to_process.pop() {
@@ -1480,7 +1481,9 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
             // Extract nested type dependencies from the WIT definition
             // Look for other custom types referenced in this definition
-            for (other_type_name, _) in &all_type_definitions {
+            let mut type_def_keys: Vec<_> = all_type_definitions.keys().collect();
+            type_def_keys.sort();
+            for other_type_name in type_def_keys {
                 if other_type_name != &type_name && wit_def.contains(other_type_name) {
                     deps.push(other_type_name.clone());
                     if !needed_types.contains(other_type_name)
@@ -1520,6 +1523,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         .filter(|(_, &degree)| degree == 0)
         .map(|(name, _)| name.clone())
         .collect();
+    queue.sort();
 
     // Process queue
     while let Some(type_name) = queue.pop() {
@@ -1755,7 +1759,9 @@ fn rewrite_wit(
     }
 
     // handle non-existing api files
-    for wit_world in wit_worlds.iter() {
+    let mut wit_worlds_sorted: Vec<_> = wit_worlds.iter().collect();
+    wit_worlds_sorted.sort();
+    for wit_world in wit_worlds_sorted {
         for prefix in ["", "types-"] {
             let wit_world = format!("{prefix}{wit_world}");
             let world_content =
@@ -2240,7 +2246,12 @@ fn generate_wit_file(
     let imports_section = all_imports_with_indent.join("\n");
 
     // Create updated world content with proper indentation
-    let include_lines: String = include_lines.iter().map(|l| format!("    {l}\n")).collect();
+    let mut include_lines_sorted: Vec<_> = include_lines.iter().collect();
+    include_lines_sorted.sort();
+    let include_lines: String = include_lines_sorted
+        .iter()
+        .map(|l| format!("    {l}\n"))
+        .collect();
     let world_content = format!("world {world_name} {{\n{imports_section}\n{include_lines}}}");
 
     return Ok(world_content);
