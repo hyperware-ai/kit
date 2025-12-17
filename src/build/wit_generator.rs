@@ -1392,7 +1392,9 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
     // Iteratively collect type definitions and their dependencies
     while !types_to_collect.is_empty() {
-        let current_batch = types_to_collect.clone();
+        // Convert to sorted Vec for deterministic iteration order
+        let mut current_batch: Vec<String> = types_to_collect.iter().cloned().collect();
+        current_batch.sort();
         types_to_collect.clear();
 
         for type_name in current_batch {
@@ -1466,7 +1468,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         .filter(|ty| !is_wit_primitive_or_builtin(ty))
         .cloned()
         .collect();
-    to_process.sort();
+    // Sort in descending order so pop() returns items in ascending alphabetical order
+    to_process.sort_by(|a, b| b.cmp(a));
 
     // First pass: collect all needed types and their dependencies
     while let Some(type_name) = to_process.pop() {
@@ -1490,6 +1493,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                         && !to_process.contains(other_type_name)
                     {
                         to_process.push(other_type_name.clone());
+                        // Re-sort in descending order for deterministic output
+                        to_process.sort_by(|a, b| b.cmp(a));
                     }
                 }
             }
@@ -1503,8 +1508,10 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     let mut sorted_types = Vec::new();
     let mut in_degree: HashMap<String, usize> = HashMap::new();
 
-    // Initialize in-degrees
-    for type_name in &needed_types {
+    // Initialize in-degrees (sort for deterministic order)
+    let mut needed_types_sorted: Vec<String> = needed_types.iter().cloned().collect();
+    needed_types_sorted.sort();
+    for type_name in &needed_types_sorted {
         in_degree.insert(type_name.clone(), 0);
     }
 
@@ -1523,7 +1530,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         .filter(|(_, &degree)| degree == 0)
         .map(|(name, _)| name.clone())
         .collect();
-    queue.sort();
+    // Sort in descending order so pop() returns items in ascending alphabetical order
+    queue.sort_by(|a, b| b.cmp(a));
 
     // Process queue
     while let Some(type_name) = queue.pop() {
@@ -1536,6 +1544,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     *degree -= 1;
                     if *degree == 0 {
                         queue.push(dep.clone());
+                        // Re-sort in descending order for deterministic output
+                        queue.sort_by(|a, b| b.cmp(a));
                     }
                 }
             }
@@ -1544,11 +1554,13 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
     // Check for cycles
     if sorted_types.len() != needed_types.len() {
-        let missing: Vec<String> = needed_types
+        let mut missing: Vec<String> = needed_types
             .iter()
             .filter(|t| !sorted_types.contains(t))
             .cloned()
             .collect();
+        // Sort for deterministic output order
+        missing.sort();
         warn!(missing = ?missing, "Circular dependency detected in type definitions");
         // Add remaining types anyway (WIT might still work)
         for t in missing {
