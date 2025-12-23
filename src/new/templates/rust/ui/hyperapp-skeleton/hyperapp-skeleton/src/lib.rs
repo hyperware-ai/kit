@@ -40,7 +40,7 @@ pub struct Status {
             config: hyperware_process_lib::http::server::HttpBindingConfig::new(false, false, false, None),
         },
     ],
-    save_config = hyperware_process_lib::hyperapp::SaveOptions::EveryMessage,
+    save_config = hyperware_process_lib::hyperapp::SaveOptions::OnDiff,
     wit_world = "hyperapp-skeleton-template-dot-os-v0"
 )]
 impl AppState {
