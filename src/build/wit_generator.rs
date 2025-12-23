@@ -1392,7 +1392,9 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
     // Iteratively collect type definitions and their dependencies
     while !types_to_collect.is_empty() {
-        let current_batch = types_to_collect.clone();
+        // Convert to sorted Vec for deterministic iteration order
+        let mut current_batch: Vec<String> = types_to_collect.iter().cloned().collect();
+        current_batch.sort();
         types_to_collect.clear();
 
         for type_name in current_batch {
@@ -1466,6 +1468,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         .filter(|ty| !is_wit_primitive_or_builtin(ty))
         .cloned()
         .collect();
+    // Sort in descending order so pop() returns items in ascending alphabetical order
+    to_process.sort_by(|a, b| b.cmp(a));
 
     // First pass: collect all needed types and their dependencies
     while let Some(type_name) = to_process.pop() {
@@ -1480,13 +1484,17 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
             // Extract nested type dependencies from the WIT definition
             // Look for other custom types referenced in this definition
-            for (other_type_name, _) in &all_type_definitions {
+            let mut type_def_keys: Vec<_> = all_type_definitions.keys().collect();
+            type_def_keys.sort();
+            for other_type_name in type_def_keys {
                 if other_type_name != &type_name && wit_def.contains(other_type_name) {
                     deps.push(other_type_name.clone());
                     if !needed_types.contains(other_type_name)
                         && !to_process.contains(other_type_name)
                     {
                         to_process.push(other_type_name.clone());
+                        // Re-sort in descending order for deterministic output
+                        to_process.sort_by(|a, b| b.cmp(a));
                     }
                 }
             }
@@ -1500,8 +1508,10 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     let mut sorted_types = Vec::new();
     let mut in_degree: HashMap<String, usize> = HashMap::new();
 
-    // Initialize in-degrees
-    for type_name in &needed_types {
+    // Initialize in-degrees (sort for deterministic order)
+    let mut needed_types_sorted: Vec<String> = needed_types.iter().cloned().collect();
+    needed_types_sorted.sort();
+    for type_name in &needed_types_sorted {
         in_degree.insert(type_name.clone(), 0);
     }
 
@@ -1520,6 +1530,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         .filter(|(_, &degree)| degree == 0)
         .map(|(name, _)| name.clone())
         .collect();
+    // Sort in descending order so pop() returns items in ascending alphabetical order
+    queue.sort_by(|a, b| b.cmp(a));
 
     // Process queue
     while let Some(type_name) = queue.pop() {
@@ -1532,6 +1544,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     *degree -= 1;
                     if *degree == 0 {
                         queue.push(dep.clone());
+                        // Re-sort in descending order for deterministic output
+                        queue.sort_by(|a, b| b.cmp(a));
                     }
                 }
             }
@@ -1540,11 +1554,13 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
     // Check for cycles
     if sorted_types.len() != needed_types.len() {
-        let missing: Vec<String> = needed_types
+        let mut missing: Vec<String> = needed_types
             .iter()
             .filter(|t| !sorted_types.contains(t))
             .cloned()
             .collect();
+        // Sort for deterministic output order
+        missing.sort();
         warn!(missing = ?missing, "Circular dependency detected in type definitions");
         // Add remaining types anyway (WIT might still work)
         for t in missing {
@@ -1755,7 +1771,9 @@ fn rewrite_wit(
     }
 
     // handle non-existing api files
-    for wit_world in wit_worlds.iter() {
+    let mut wit_worlds_sorted: Vec<_> = wit_worlds.iter().collect();
+    wit_worlds_sorted.sort();
+    for wit_world in wit_worlds_sorted {
         for prefix in ["", "types-"] {
             let wit_world = format!("{prefix}{wit_world}");
             let world_content =
@@ -2240,7 +2258,12 @@ fn generate_wit_file(
     let imports_section = all_imports_with_indent.join("\n");
 
     // Create updated world content with proper indentation
-    let include_lines: String = include_lines.iter().map(|l| format!("    {l}\n")).collect();
+    let mut include_lines_sorted: Vec<_> = include_lines.iter().collect();
+    include_lines_sorted.sort();
+    let include_lines: String = include_lines_sorted
+        .iter()
+        .map(|l| format!("    {l}\n"))
+        .collect();
     let world_content = format!("world {world_name} {{\n{imports_section}\n{include_lines}}}");
 
     return Ok(world_content);
