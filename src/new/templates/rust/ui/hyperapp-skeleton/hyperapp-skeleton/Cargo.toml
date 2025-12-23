@@ -1,6 +1,6 @@
 [dependencies]
 anyhow = "1.0"
-hyperapp_macro = "0.1.1"
+hyperapp_macro = "0.2.0"
 process_macros = "0.1"
 serde_json = "1.0"
 wit-bindgen = "0.42.1"
@@ -10,7 +10,7 @@ optional = true
 path = "../target/hyperapp-skeleton-caller-utils"
 
 [dependencies.hyperware_process_lib]
-version = "2.2.0"
+version = "3.0.0"
 features = ["hyperapp"]
 
 [dependencies.serde]
