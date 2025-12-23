@@ -1,4 +1,4 @@
-use caller_utils::sign::{sign_local_rpc, verify_local_rpc};
+use id_caller_utils::sign_app::{sign_local_rpc, verify_local_rpc};
 use hyperware_process_lib::logging::{init_logging, Level};
 use hyperware_process_lib::Address;
 
@@ -22,7 +22,7 @@ fn make_sign_sys() -> Address {
             config: WsBindingConfig::default(),
         }
     ],
-    save_config = SaveOptions::Never,
+    save_config = hyperware_process_lib::hyperapp::SaveOptions::Never,
     wit_world = "id-sys-v0",
 )]
 impl IdState {

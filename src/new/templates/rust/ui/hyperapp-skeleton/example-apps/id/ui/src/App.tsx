@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import HyperwareClientApi from "@hyperware-ai/client-api";
 import "./App.css";
 import useIdStore from "./store/id";
-import { sign, verify, ApiError } from "../../target/ui/caller-utils";
+import { Id, ApiError } from "../../target/ui/caller-utils";
 
 const BASE_URL = import.meta.env.BASE_URL;
 if (window.our) window.our.process = BASE_URL?.replace("/", "");
@@ -61,7 +61,7 @@ function App() {
 
       // Send a message to the node via the sign function
       try {
-        const signature = await sign(messageArray);
+        const signature = await Id.sign(messageArray);
 
         // Add the message and its signature to the store
         addSignedMessage(message, signature);
@@ -89,7 +89,7 @@ function App() {
 
       // Send a verification request via the verify function
       try {
-        const isValid = await verify(messageArray, signedMessage.signature);
+        const isValid = await Id.verify(messageArray, signedMessage.signature);
 
         // Update the verification status in the store
         updateVerificationStatus(index, isValid);
