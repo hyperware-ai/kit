@@ -4,11 +4,10 @@ use hyperware_process_lib::logging::{init_logging, Level};
 use hyperware_process_lib::net::{NetAction, NetResponse};
 use hyperware_process_lib::{last_blob, our, LazyLoadBlob, Request};
 
-use hyperware_app_common::{send_rmp, source};
-use hyperprocess_macro::hyperprocess;
+use hyperware_process_lib::hyperapp::{send_rmp, source};
 
 #[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
-struct SignState {}
+struct SignAppState {}
 
 async fn sign(message: Vec<u8>) -> anyhow::Result<Vec<u8>> {
     let message = make_message(&message);
@@ -69,14 +68,14 @@ fn make_message(bytes: &Vec<u8>) -> Vec<u8> {
     [source().to_string().as_bytes(), &bytes].concat()
 }
 
-#[hyperprocess(
+#[hyperapp_macro::hyperapp(
     name = "sign",
     ui = None,
     endpoints = vec![],
-    save_config = SaveOptions::Never,
-    wit_world = "sign-sys-v0",
+    save_config = hyperware_process_lib::hyperapp::SaveOptions::Never,
+    wit_world = "sign-app-sys-v0",
 )]
-impl SignState {
+impl SignAppState {
     #[init]
     async fn init(&mut self) {
         init_logging(Level::DEBUG, Level::INFO, None, None, None).unwrap();
