@@ -280,7 +280,11 @@ fn find_interfaces_in_world(api_dir: &Path, world_name: &str) -> Result<Vec<Stri
             .lines()
             .find(|line| line.trim().starts_with("world "))
             .and_then(|world_line| world_line.trim().split_whitespace().nth(1))
-            .map(|name| name.trim_end_matches(" {").trim_start_matches('%').to_string());
+            .map(|name| {
+                name.trim_end_matches(" {")
+                    .trim_start_matches('%')
+                    .to_string()
+            });
         if let Some(clean_name) = world_name {
             world_defs.insert(clean_name.clone(), content);
             debug!(file = %path.display(), world = %clean_name, "Indexed world definition");
