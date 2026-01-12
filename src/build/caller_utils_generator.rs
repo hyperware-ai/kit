@@ -276,12 +276,14 @@ fn find_interfaces_in_world(api_dir: &Path, world_name: &str) -> Result<Vec<Stri
         if !content.contains("world ") {
             continue;
         }
-        if let Some(world_line) = content.lines().find(|line| line.trim().starts_with("world ")) {
-            if let Some(name) = world_line.trim().split_whitespace().nth(1) {
-                let clean_name = name.trim_end_matches(" {").trim_start_matches('%');
-                world_defs.insert(clean_name.to_string(), content);
-                debug!(file = %path.display(), world = %clean_name, "Indexed world definition");
-            }
+        let world_name = content
+            .lines()
+            .find(|line| line.trim().starts_with("world "))
+            .and_then(|world_line| world_line.trim().split_whitespace().nth(1))
+            .map(|name| name.trim_end_matches(" {").trim_start_matches('%').to_string());
+        if let Some(clean_name) = world_name {
+            world_defs.insert(clean_name.clone(), content);
+            debug!(file = %path.display(), world = %clean_name, "Indexed world definition");
         }
     }
 
