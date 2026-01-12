@@ -484,8 +484,8 @@ fn generate_async_function(signature: &SignatureStruct) -> Option<String> {
             if field.wit_type == "string" {
                 target_param = "&str";
             } else {
-                // Use hyperware_process_lib::Address instead of WitAddress
-                target_param = "&Address";
+                // Use a distinct alias for hyperware_process_lib::Address to avoid WIT name clashes
+                target_param = "&ProcessAddress";
             }
         } else if field.name == "returning" {
             return_type = rust_type;
@@ -778,7 +778,7 @@ crate-type = ["cdylib", "lib"]
     // Add global imports
     lib_rs.push_str("pub use hyperware_process_lib::hyperapp::AppSendError;\n");
     lib_rs.push_str("pub use hyperware_process_lib::hyperapp::send;\n");
-    lib_rs.push_str("pub use hyperware_process_lib::{Address, Request};\n");
+    lib_rs.push_str("pub use hyperware_process_lib::{Address as ProcessAddress, Request};\n");
     lib_rs.push_str("use serde_json::json;\n\n");
 
     // Add interface use statements
