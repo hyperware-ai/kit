@@ -1,0 +1,20 @@
+[
+  {
+    "process_name": "hyperapp-skeleton",
+    "process_wasm_path": "/hyperapp-skeleton.wasm",
+    "on_exit": "Restart",
+    "request_networking": false,
+    "request_capabilities": [
+      "homepage:homepage:sys",
+      "http-server:distro:sys",
+      "vfs:distro:sys"
+    ],
+    "grant_capabilities": [
+      "homepage:homepage:sys",
+      "http-server:distro:sys",
+      "vfs:distro:sys",
+      "tester:tester:sys"
+    ],
+    "public": false
+  }
+]

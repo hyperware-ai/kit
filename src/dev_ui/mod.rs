@@ -4,7 +4,7 @@ use std::process::Command;
 use color_eyre::{eyre::eyre, Result};
 use tracing::{info, instrument};
 
-use crate::build::{make_fake_kill_chan, run_command};
+use crate::build::{make_fake_kill_chan, run_command, DEFAULT_RUST_TOOLCHAIN};
 use crate::setup::{check_js_deps, get_deps, get_newest_valid_node_version};
 
 #[instrument(level = "trace", skip_all)]
@@ -17,7 +17,7 @@ pub async fn execute(
     if !skip_deps_check {
         let deps = check_js_deps()?;
         let mut recv_kill = make_fake_kill_chan();
-        get_deps(deps, &mut recv_kill, false).await?;
+        get_deps(deps, &mut recv_kill, false, false, DEFAULT_RUST_TOOLCHAIN).await?;
     }
     let valid_node = get_newest_valid_node_version(None, None)?;
 

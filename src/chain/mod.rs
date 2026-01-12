@@ -8,6 +8,7 @@ use reqwest::Client;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, info, instrument};
 
+use crate::build;
 use crate::run_tests::cleanup::{clean_process_by_pid, cleanup_on_signal};
 use crate::run_tests::types::BroadcastRecvBool;
 use crate::setup::{check_foundry_deps, get_deps};
@@ -257,7 +258,14 @@ pub async fn start_chain(
     tracing: bool,
 ) -> Result<Option<Child>> {
     let deps = check_foundry_deps()?;
-    get_deps(deps, &mut recv_kill, verbose).await?;
+    get_deps(
+        deps,
+        &mut recv_kill,
+        false,
+        verbose,
+        build::DEFAULT_RUST_TOOLCHAIN,
+    )
+    .await?;
 
     info!("Checking for Anvil on port {}...", port);
     if wait_for_anvil(port, 1, None).await.is_ok() {

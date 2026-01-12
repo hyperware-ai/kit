@@ -1,0 +1,11 @@
+[profile.release]
+lto = true
+opt-level = "s"
+panic = "abort"
+
+[workspace]
+members = [
+    "sign",
+    "target/sign-caller-util?",
+]
+resolver = "2"

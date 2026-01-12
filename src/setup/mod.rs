@@ -48,6 +48,13 @@ impl std::fmt::Display for Dependency {
     }
 }
 
+// use Display
+impl std::fmt::Debug for Dependency {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
 // hack to allow definition of Display
 struct Dependencies(Vec<Dependency>);
 impl std::fmt::Display for Dependencies {
@@ -202,20 +209,20 @@ fn call_with_nvm(arg: &str, verbose: bool) -> Result<()> {
 }
 
 #[instrument(level = "trace", skip_all)]
-fn call_rustup(arg: &str, verbose: bool) -> Result<()> {
+fn call_rustup(arg: &str, verbose: bool, toolchain: &str) -> Result<()> {
     run_command(
-        Command::new("bash").args(&["-c", &format!("rustup +stable {}", arg)]),
+        Command::new("bash").args(&["-c", &format!("rustup {} {}", toolchain, arg)]),
         verbose,
     )?;
     Ok(())
 }
 
 #[instrument(level = "trace", skip_all)]
-fn call_cargo(arg: &str, verbose: bool) -> Result<()> {
+fn call_cargo(arg: &str, verbose: bool, toolchain: &str) -> Result<()> {
     let command = if arg.contains("--color=always") {
-        format!("cargo +stable {}", arg)
+        format!("cargo {} {}", toolchain, arg)
     } else {
-        format!("cargo +stable --color=always {}", arg)
+        format!("cargo {} --color=always {}", toolchain, arg)
     };
     run_command(Command::new("bash").args(&["-c", &command]), verbose)?;
     Ok(())
@@ -245,11 +252,11 @@ fn parse_version(version_str: &str) -> Option<(u32, u32)> {
 }
 
 #[instrument(level = "trace", skip_all)]
-fn check_rust_toolchains_targets() -> Result<Vec<Dependency>> {
+fn check_rust_toolchains_targets(toolchain: &str) -> Result<Vec<Dependency>> {
     let mut missing_deps = Vec::new();
 
     let output = Command::new("rustup")
-        .arg("+stable")
+        .arg(toolchain)
         .arg("show")
         .output()?
         .stdout;
@@ -347,11 +354,11 @@ pub fn check_foundry_deps() -> Result<Vec<Dependency>> {
     Ok(vec![])
 }
 
-/// install forge+anvil+others, could be separated into binary extractions from github releases.
+/// install Foundry, could be separated into binary extractions from github releases.
 #[instrument(level = "trace", skip_all)]
 fn install_foundry(verbose: bool) -> Result<()> {
     let download_cmd = "curl -L https://foundry.paradigm.xyz | bash";
-    let install_cmd = ". ~/.bashrc && foundryup";
+    let install_cmd = "export PATH=\"$PATH:$HOME/.foundry/bin\" && foundryup";
     run_command(Command::new("bash").args(&["-c", download_cmd]), verbose)?;
     run_command(Command::new("bash").args(&["-c", install_cmd]), verbose)?;
 
@@ -360,7 +367,7 @@ fn install_foundry(verbose: bool) -> Result<()> {
 
 /// Check for Rust deps, returning a Vec of not found: can be automatically fetched
 #[instrument(level = "trace", skip_all)]
-pub fn check_rust_deps() -> Result<Vec<Dependency>> {
+pub fn check_rust_deps(toolchain: &str) -> Result<Vec<Dependency>> {
     if !is_command_installed("rustup")? {
         // don't have rust -> missing all
         return Ok(vec![
@@ -370,7 +377,7 @@ pub fn check_rust_deps() -> Result<Vec<Dependency>> {
         ]);
     }
 
-    let mut missing_deps = check_rust_toolchains_targets()?;
+    let mut missing_deps = check_rust_toolchains_targets(toolchain)?;
     if !is_command_installed("wasm-tools")? {
         missing_deps.push(Dependency::WasmTools);
     }
@@ -397,83 +404,134 @@ pub fn check_docker_deps() -> Result<Vec<Dependency>> {
 pub async fn get_deps(
     deps: Vec<Dependency>,
     recv_kill: &mut BroadcastRecvBool,
+    non_interactive: bool,
     verbose: bool,
+    toolchain: &str,
 ) -> Result<()> {
     if deps.is_empty() {
         return Ok(());
     }
 
-    // If setup required, request user permission
-    print!(
-        "kit requires {} missing {}: {}. Install? [Y/n]: ",
-        if deps.len() == 1 { "this" } else { "these" },
-        if deps.len() == 1 {
-            "dependency"
-        } else {
-            "dependencies"
-        },
-        Dependencies(deps.clone()),
-    );
-    // Flush to ensure the prompt is displayed before input
-    io::stdout().flush().unwrap();
+    if non_interactive {
+        install_deps(deps, verbose, toolchain)?;
+    } else {
+        // If setup required, request user permission
+        print!(
+            "kit requires {} missing {}: {}. Install? [Y/n]: ",
+            if deps.len() == 1 { "this" } else { "these" },
+            if deps.len() == 1 {
+                "dependency"
+            } else {
+                "dependencies"
+            },
+            Dependencies(deps.clone()),
+        );
+        // Flush to ensure the prompt is displayed before input
+        io::stdout().flush().unwrap();
 
-    // Read the user's response
-    let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
-    tokio::spawn(async move {
-        let mut response = String::new();
-        io::stdin().read_line(&mut response).unwrap();
-        sender.send(response).await.unwrap();
-    });
+        // Read the user's response
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        tokio::spawn(async move {
+            let mut response = String::new();
+            io::stdin().read_line(&mut response).unwrap();
+            sender.send(response).await.unwrap();
+        });
 
-    // Process the response
-    let response = tokio::select! {
-        Some(response) = receiver.recv() => response,
-        k = recv_kill.recv() => {
-            match k {
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    // some systems drop the fake sender produced in build/mod.rs:57
-                    //  make_fake_kill_chan() and so we handle this by ignoring the
-                    //  Closed message that comes through
-                    //  https://docs.rs/tokio/latest/tokio/sync/broadcast/struct.Receiver.html#method.recv
-                    receiver.recv().await.unwrap()
-                }
-                _ => return Err(eyre!("got exit code")),
-            }
-        }
-    };
-    let response = response.trim().to_lowercase();
-    match response.as_str() {
-        "y" | "yes" | "" => {
-            for dep in deps {
-                match dep {
-                    Dependency::Nvm => install_nvm(verbose)?,
-                    Dependency::Npm => call_with_nvm(&format!("nvm install-latest-npm"), verbose)?,
-                    Dependency::Node => call_with_nvm(
-                        &format!("nvm install {}.{}", REQUIRED_NODE_MAJOR, MINIMUM_NODE_MINOR,),
-                        verbose,
-                    )?,
-                    Dependency::Rust => install_rust(verbose)?,
-                    Dependency::RustWasm32Wasi => call_rustup("target add wasm32-wasip1", verbose)?,
-                    Dependency::WasmTools => call_cargo("install wasm-tools", verbose)?,
-                    Dependency::Foundry => install_foundry(verbose)?,
-                    Dependency::Docker => {}
+        // Process the response
+        let response = tokio::select! {
+            Some(response) = receiver.recv() => response,
+            k = recv_kill.recv() => {
+                match k {
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // some systems drop the fake sender produced in build/mod.rs:57
+                        //  make_fake_kill_chan() and so we handle this by ignoring the
+                        //  Closed message that comes through
+                        //  https://docs.rs/tokio/latest/tokio/sync/broadcast/struct.Receiver.html#method.recv
+                        receiver.recv().await.unwrap()
+                    }
+                    _ => return Err(eyre!("got exit code")),
                 }
             }
+        };
+        let response = response.trim().to_lowercase();
+        match response.as_str() {
+            "y" | "yes" | "" => install_deps(deps, verbose, toolchain)?,
+            r => warn!("Got '{}'; not getting deps.", r),
         }
-        r => warn!("Got '{}'; not getting deps.", r),
     }
     Ok(())
 }
 
 #[instrument(level = "trace", skip_all)]
-pub async fn execute(recv_kill: &mut BroadcastRecvBool, verbose: bool) -> Result<()> {
+fn install_deps(deps: Vec<Dependency>, verbose: bool, toolchain: &str) -> Result<()> {
+    for dep in deps {
+        match dep {
+            Dependency::Nvm => install_nvm(verbose)?,
+            Dependency::Npm => call_with_nvm(&format!("nvm install-latest-npm"), verbose)?,
+            Dependency::Node => call_with_nvm(
+                &format!("nvm install {}.{}", REQUIRED_NODE_MAJOR, MINIMUM_NODE_MINOR,),
+                verbose,
+            )?,
+            Dependency::Rust => install_rust(verbose)?,
+            Dependency::RustWasm32Wasi => {
+                call_rustup("target add wasm32-wasip1", verbose, toolchain)?
+            }
+            Dependency::WasmTools => call_cargo("install wasm-tools", verbose, toolchain)?,
+            Dependency::Foundry => install_foundry(verbose)?,
+            Dependency::Docker => {}
+        }
+    }
+    Ok(())
+}
+
+#[instrument(level = "trace", skip_all)]
+pub async fn execute(
+    recv_kill: &mut BroadcastRecvBool,
+    docker_optional: bool,
+    python_optional: bool,
+    foundry_optional: bool,
+    javascript_optional: bool,
+    non_interactive: bool,
+    verbose: bool,
+    toolchain: &str,
+) -> Result<()> {
     info!("Setting up...");
 
-    check_py_deps()?;
-    let mut missing_deps = check_js_deps()?;
-    missing_deps.append(&mut check_rust_deps()?);
-    missing_deps.append(&mut check_docker_deps()?);
-    get_deps(missing_deps, recv_kill, verbose).await?;
+    let py_result = check_py_deps();
+    if !python_optional {
+        py_result?;
+    } else {
+        if let Err(e) = py_result {
+            warn!("Python deps are not satisfied: {e}");
+        }
+    }
+
+    let mut missing_deps = check_rust_deps(toolchain)?;
+
+    let mut js_deps = check_js_deps()?;
+    if !javascript_optional {
+        missing_deps.append(&mut js_deps);
+    } else {
+        warn!("JavaScript deps are not satisfied: {js_deps:?}");
+    }
+
+    let docker_result = check_docker_deps();
+    if !docker_optional {
+        missing_deps.append(&mut docker_result?);
+    } else {
+        if let Err(e) = docker_result {
+            warn!("Docker deps are not satisfied: {e}");
+        }
+    }
+
+    let mut foundry_deps = check_foundry_deps()?;
+    if !foundry_optional {
+        missing_deps.append(&mut foundry_deps);
+    } else {
+        warn!("Foundry deps are not satisfied: {foundry_deps:?}");
+    }
+
+    get_deps(missing_deps, recv_kill, non_interactive, verbose, toolchain).await?;
 
     info!("Done setting up.");
     Ok(())

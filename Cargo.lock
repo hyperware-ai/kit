@@ -2282,7 +2282,7 @@ dependencies = [
 
 [[package]]
 name = "kit"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "alloy",
  "alloy-sol-macro",
@@ -2309,6 +2309,7 @@ dependencies = [
  "sha2",
  "sha3",
  "syn 2.0.90",
+ "tempfile",
  "thiserror 1.0.63",
  "tokio",
  "toml",

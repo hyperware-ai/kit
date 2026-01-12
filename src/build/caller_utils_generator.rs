@@ -149,12 +149,109 @@ struct SignatureField {
     wit_type: String,
 }
 
+/// Parse a tuple type string like "tuple<u64, bool>" into its element types
+fn parse_tuple_types(tuple_type: &str) -> Vec<String> {
+    if !tuple_type.starts_with("tuple<") || !tuple_type.ends_with(">") {
+        return vec![];
+    }
+    let inner = &tuple_type[6..tuple_type.len() - 1];
+    if inner.is_empty() {
+        return vec![];
+    }
+    // Handle nested generics by tracking angle bracket depth
+    let mut types = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0;
+
+    for c in inner.chars() {
+        match c {
+            '<' => {
+                depth += 1;
+                current.push(c);
+            }
+            '>' => {
+                depth -= 1;
+                current.push(c);
+            }
+            ',' if depth == 0 => {
+                types.push(current.trim().to_string());
+                current = String::new();
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+    if !current.trim().is_empty() {
+        types.push(current.trim().to_string());
+    }
+    types
+}
+
+/// Parse args comment like `// args: (foo: u64, bar: bool)` into parameter names
+fn parse_args_comment(comment: &str) -> Vec<String> {
+    let comment = comment.trim().trim_start_matches("//").trim();
+    if !comment.starts_with("args:") {
+        return vec![];
+    }
+    let args_part = comment.trim_start_matches("args:").trim();
+    if !args_part.starts_with("(") || !args_part.ends_with(")") {
+        return vec![];
+    }
+    let inner = &args_part[1..args_part.len() - 1];
+    if inner.is_empty() {
+        return vec![];
+    }
+
+    let mut names = Vec::new();
+    // Handle nested generics by tracking angle bracket depth
+    let mut current = String::new();
+    let mut depth = 0;
+
+    for c in inner.chars() {
+        match c {
+            '<' => {
+                depth += 1;
+                current.push(c);
+            }
+            '>' => {
+                depth -= 1;
+                current.push(c);
+            }
+            ',' if depth == 0 => {
+                // Extract name from "name: type"
+                if let Some(name) = current.split(':').next() {
+                    let name = name.trim();
+                    if !name.is_empty() {
+                        names.push(name.to_string());
+                    }
+                }
+                current = String::new();
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+    // Handle last parameter
+    if !current.trim().is_empty() {
+        if let Some(name) = current.split(':').next() {
+            let name = name.trim();
+            if !name.is_empty() {
+                names.push(name.to_string());
+            }
+        }
+    }
+    names
+}
+
 // Structure to represent a WIT signature struct
 #[derive(Debug)]
 struct SignatureStruct {
     function_name: String,
     attr_type: String,
     fields: Vec<SignatureField>,
+    args_comment: Option<String>, // Parsed from // args: (name: type, ...) comment
 }
 
 // Find all interface imports in the world WIT file
@@ -211,6 +308,7 @@ fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>
     // Simple parser for WIT files to extract record definitions and types
     let lines: Vec<_> = content.lines().collect();
     let mut i = 0;
+    let mut pending_args_comment: Option<String> = None;
 
     while i < lines.len() {
         let line = lines[i].trim();
@@ -233,6 +331,12 @@ fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>
             debug!(name = %variant_name, "Found type definition (variant)");
             type_names.push(variant_name.to_string());
         }
+        // Look for args comment above record: // args: (name: type, ...)
+        else if line.starts_with("// args:") {
+            // Store this comment - it will be used by the next signature record
+            pending_args_comment = Some(line.to_string());
+            debug!(args_comment = %line, "Found args comment");
+        }
         // Look for signature record definitions
         else if line.starts_with("record ") && line.contains("-signature-") {
             let record_name = line
@@ -252,6 +356,9 @@ fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>
             let function_name = parts[0].to_string();
             let attr_type = parts[1].to_string();
             debug!(function = %function_name, attr_type = %attr_type, "Extracted function name and type");
+
+            // Use the pending args comment if present
+            let args_comment = pending_args_comment.take();
 
             // Parse fields
             let mut fields = Vec::new();
@@ -286,6 +393,7 @@ fn parse_wit_file(file_path: &Path) -> Result<(Vec<SignatureStruct>, Vec<String>
                 function_name,
                 attr_type,
                 fields,
+                args_comment,
             });
         }
 
@@ -313,6 +421,21 @@ fn generate_async_function(signature: &SignatureStruct) -> Option<String> {
     let full_function_name = format!("{}_{}_rpc", snake_function_name, signature.attr_type);
     debug!(name = %full_function_name, "Generating function stub");
 
+    // Extract arg names from the args comment if present
+    let arg_names: Vec<String> = signature
+        .args_comment
+        .as_ref()
+        .map(|c| {
+            parse_args_comment(c)
+                .into_iter()
+                .map(|n| to_snake_case(&n))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !arg_names.is_empty() {
+        debug!(arg_names = ?arg_names, "Parsed arg names from comment");
+    }
+
     // Extract parameters and return type
     let mut params = Vec::new();
     let mut param_names = Vec::new();
@@ -320,7 +443,6 @@ fn generate_async_function(signature: &SignatureStruct) -> Option<String> {
     let mut target_param = "";
 
     for field in &signature.fields {
-        let field_name_snake = to_snake_case(&field.name);
         let rust_type = wit_type_to_rust(&field.wit_type);
         debug!(field = %field.name, wit_type = %field.wit_type, rust_type = %rust_type, "Processing field");
 
@@ -334,10 +456,29 @@ fn generate_async_function(signature: &SignatureStruct) -> Option<String> {
         } else if field.name == "returning" {
             return_type = rust_type;
             debug!(return_type = %return_type, "Identified return type");
+        } else if field.name == "arg-types" {
+            // Parse the arg-types tuple to extract individual parameter types
+            let tuple_types = parse_tuple_types(&field.wit_type);
+            for (i, wit_type) in tuple_types.iter().enumerate() {
+                // Use actual arg name if available, otherwise fall back to arg0, arg1, etc.
+                let param_name = arg_names
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| format!("arg{}", i));
+                let param_rust_type = wit_type_to_rust(wit_type);
+                params.push(format!("{}: {}", param_name, param_rust_type));
+                param_names.push(param_name);
+                debug!(param_name = param_names.last().unwrap(), wit_type = %wit_type, "Added tuple parameter");
+            }
         } else {
+            // Legacy support: handle individual parameter fields (for backwards compatibility)
+            let field_name_snake = to_snake_case(&field.name);
             params.push(format!("{}: {}", field_name_snake, rust_type));
             param_names.push(field_name_snake);
-            debug!(param_name = param_names.last().unwrap(), "Added parameter");
+            debug!(
+                param_name = param_names.last().unwrap(),
+                "Added parameter (legacy)"
+            );
         }
     }
 
@@ -403,10 +544,20 @@ fn generate_async_function(signature: &SignatureStruct) -> Option<String> {
 // Create the caller-utils crate with a single lib.rs file
 #[instrument(level = "trace", skip_all)]
 fn create_caller_utils_crate(api_dir: &Path, base_dir: &Path) -> Result<()> {
+    // Extract package name from base directory
+    let package_name = base_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| eyre!("Could not extract package name from base directory"))?;
+
+    // Create crate name by prepending package name
+    let crate_name = format!("{}-caller-utils", package_name);
+
     // Path to the new crate
-    let caller_utils_dir = base_dir.join("target").join("caller-utils");
+    let caller_utils_dir = base_dir.join("target").join(&crate_name);
     debug!(
         path = %caller_utils_dir.display(),
+        crate_name = %crate_name,
         "Creating caller-utils crate"
     );
 
@@ -422,7 +573,7 @@ fn create_caller_utils_crate(api_dir: &Path, base_dir: &Path) -> Result<()> {
     // Create Cargo.toml with updated dependencies
     let cargo_toml = format!(
         r#"[package]
-name = "caller-utils"
+name = "{}"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -442,13 +593,14 @@ wit-bindgen = "0.41.0"
 [lib]
 crate-type = ["cdylib", "lib"]
 "#,
+        crate_name.replace("-", "_"),
         hyperware_dep
     );
 
     fs::write(caller_utils_dir.join("Cargo.toml"), cargo_toml)
-        .with_context(|| "Failed to write caller-utils Cargo.toml")?;
+        .with_context(|| format!("Failed to write {} Cargo.toml", crate_name))?;
 
-    debug!("Created Cargo.toml for caller-utils");
+    debug!("Created Cargo.toml for {}", crate_name);
 
     // Get the world name (preferably the types- version)
     let world_names = find_world_names(api_dir)?;
@@ -711,7 +863,7 @@ fn read_cargo_toml(path: &Path) -> Result<Value> {
 #[instrument(level = "trace", skip_all)]
 fn get_hyperware_process_lib_dependency(base_dir: &Path) -> Result<String> {
     const DEFAULT_DEP: &str =
-        r#"{ git = "https://github.com/hyperware-ai/hyperprocess-macro", rev = "4c944b2" }"#;
+        r#"{ git = "https://github.com/hyperware-ai/hyperapp-macro", rev = "4c944b2" }"#;
 
     // Read workspace members
     let workspace_toml = read_cargo_toml(&base_dir.join("Cargo.toml"))?;
@@ -787,7 +939,7 @@ fn get_hyperware_process_lib_dependency(base_dir: &Path) -> Result<String> {
 
 // Update workspace Cargo.toml to include the caller-utils crate
 #[instrument(level = "trace", skip_all)]
-fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
+fn update_workspace_cargo_toml(base_dir: &Path, crate_name: &str) -> Result<()> {
     let workspace_cargo_toml = base_dir.join("Cargo.toml");
     debug!(
         path = %workspace_cargo_toml.display(),
@@ -819,12 +971,15 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
         if let Some(members) = workspace.get_mut("members") {
             if let Some(members_array) = members.as_array_mut() {
                 // Check if caller-utils is already in the members list
+                // Using a `?` forces cargo to interpret it as optional, which allows building from scratch (i.e. before caller-utils has been generated)
+                let crate_name_without_s = crate_name.trim_end_matches('s');
+                let target_path = format!("target/{}?", crate_name_without_s);
                 let caller_utils_exists = members_array
                     .iter()
-                    .any(|m| m.as_str().map_or(false, |s| s == "target/caller-util?"));
+                    .any(|m| m.as_str().map_or(false, |s| s == target_path));
 
                 if !caller_utils_exists {
-                    members_array.push(Value::String("target/caller-util?".to_string()));
+                    members_array.push(Value::String(target_path.clone()));
 
                     // Write back the updated TOML
                     let updated_content = toml::to_string_pretty(&parsed_toml)
@@ -840,7 +995,8 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
                     debug!("Successfully updated workspace Cargo.toml");
                 } else {
                     debug!(
-                        "Workspace Cargo.toml already up-to-date regarding caller-util? member."
+                        "Workspace Cargo.toml already up-to-date regarding {} member.",
+                        target_path
                     );
                 }
             }
@@ -852,7 +1008,16 @@ fn update_workspace_cargo_toml(base_dir: &Path) -> Result<()> {
 
 // Add caller-utils as a dependency to hyperware:process crates
 #[instrument(level = "trace", skip_all)]
-pub fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
+pub fn add_caller_utils_to_projects(projects: &[PathBuf], base_dir: &Path) -> Result<()> {
+    // Extract package name from base directory
+    let package_name = base_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| eyre!("Could not extract package name from base directory"))?;
+
+    // Create crate name by prepending package name
+    let crate_name = format!("{}-caller-utils", package_name);
+    let crate_name_underscore = crate_name.replace("-", "_");
     for project_path in projects {
         let cargo_toml_path = project_path.join("Cargo.toml");
         debug!(
@@ -878,42 +1043,75 @@ pub fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
         // Add caller-utils to dependencies if not already present
         if let Some(dependencies) = parsed_toml.get_mut("dependencies") {
             if let Some(deps_table) = dependencies.as_table_mut() {
-                if !deps_table.contains_key("caller-utils") {
+                if !deps_table.contains_key(&crate_name_underscore) {
                     deps_table.insert(
-                        "caller-utils".to_string(),
+                        crate_name_underscore.clone(),
                         Value::Table({
                             let mut t = toml::map::Map::new();
                             t.insert(
                                 "path".to_string(),
-                                Value::String("../target/caller-utils".to_string()),
+                                Value::String(format!("../target/{}", crate_name)),
                             );
                             t.insert("optional".to_string(), Value::Boolean(true));
                             t
                         }),
                     );
 
-                    // Write back the updated TOML
-                    let updated_content =
-                        toml::to_string_pretty(&parsed_toml).with_context(|| {
-                            format!(
-                                "Failed to serialize updated project Cargo.toml: {}",
-                                cargo_toml_path.display()
-                            )
-                        })?;
-
-                    fs::write(&cargo_toml_path, updated_content).with_context(|| {
-                        format!(
-                            "Failed to write updated project Cargo.toml: {}",
-                            cargo_toml_path.display()
-                        )
-                    })?;
-
-                    debug!(project = ?project_path.file_name().unwrap_or_default(), "Successfully added caller-utils dependency");
+                    debug!(project = ?project_path.file_name().unwrap_or_default(), "Successfully added {} dependency", crate_name_underscore);
                 } else {
-                    debug!(project = ?project_path.file_name().unwrap_or_default(), "caller-utils dependency already exists");
+                    debug!(project = ?project_path.file_name().unwrap_or_default(), "{} dependency already exists", crate_name_underscore);
                 }
             }
         }
+
+        // Add or update the features section to include caller-utils feature
+        if !parsed_toml.as_table().unwrap().contains_key("features") {
+            parsed_toml
+                .as_table_mut()
+                .unwrap()
+                .insert("features".to_string(), Value::Table(toml::map::Map::new()));
+        }
+
+        if let Some(features) = parsed_toml.get_mut("features") {
+            if let Some(features_table) = features.as_table_mut() {
+                // Add caller-utils feature that enables the package-specific caller-utils dependency
+                if !features_table.contains_key("caller-utils") {
+                    features_table.insert(
+                        "caller-utils".to_string(),
+                        Value::Array(vec![Value::String(crate_name_underscore.clone())]),
+                    );
+                    debug!(project = ?project_path.file_name().unwrap_or_default(), "Added caller-utils feature");
+                } else {
+                    // Update existing caller-utils feature if it doesn't include our dependency
+                    if let Some(caller_utils_feature) = features_table.get_mut("caller-utils") {
+                        if let Some(feature_array) = caller_utils_feature.as_array_mut() {
+                            let dep_exists = feature_array
+                                .iter()
+                                .any(|v| v.as_str().map_or(false, |s| s == crate_name_underscore));
+                            if !dep_exists {
+                                feature_array.push(Value::String(crate_name_underscore.clone()));
+                                debug!(project = ?project_path.file_name().unwrap_or_default(), "Updated caller-utils feature to include {}", crate_name_underscore);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Write back the updated TOML
+        let updated_content = toml::to_string_pretty(&parsed_toml).with_context(|| {
+            format!(
+                "Failed to serialize updated project Cargo.toml: {}",
+                cargo_toml_path.display()
+            )
+        })?;
+
+        fs::write(&cargo_toml_path, updated_content).with_context(|| {
+            format!(
+                "Failed to write updated project Cargo.toml: {}",
+                cargo_toml_path.display()
+            )
+        })?;
     }
 
     Ok(())
@@ -922,12 +1120,21 @@ pub fn add_caller_utils_to_projects(projects: &[PathBuf]) -> Result<()> {
 // Create caller-utils crate and integrate with the workspace
 #[instrument(level = "trace", skip_all)]
 pub fn create_caller_utils(base_dir: &Path, api_dir: &Path) -> Result<()> {
+    // Extract package name from base directory
+    let package_name = base_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| eyre!("Could not extract package name from base directory"))?;
+
+    // Create crate name by prepending package name
+    let crate_name = format!("{}-caller-utils", package_name);
+
     // Step 1: Create the caller-utils crate
     create_caller_utils_crate(api_dir, base_dir)?;
 
     // Step 2: Update workspace Cargo.toml
-    update_workspace_cargo_toml(base_dir)?;
+    update_workspace_cargo_toml(base_dir, &crate_name)?;
 
-    info!("Successfully created caller-utils and copied the imports");
+    info!("Successfully created {} and copied the imports", crate_name);
     Ok(())
 }

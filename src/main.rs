@@ -12,8 +12,14 @@ use fs_err as fs;
 use serde::Deserialize;
 use tracing::{error, instrument, warn, Level};
 use tracing_error::ErrorLayer;
+use tracing_subscriber::fmt::format::PrettyFields;
 use tracing_subscriber::{
-    filter, fmt, layer::SubscriberExt, prelude::*, util::SubscriberInitExt, EnvFilter,
+    filter,
+    fmt::{self as tracing_fmt},
+    layer::SubscriberExt,
+    prelude::*,
+    util::SubscriberInitExt,
+    EnvFilter,
 };
 
 use kit::{
@@ -31,6 +37,9 @@ const STDOUT_LOG_LEVEL_DEFAULT: Level = Level::INFO;
 const STDERR_LOG_LEVEL_DEFAULT: &str = "error";
 const FILE_LOG_LEVEL_DEFAULT: &str = "debug";
 const RUST_LOG: &str = "RUST_LOG";
+
+mod logging;
+use logging::AnsiPreservingFormatter;
 
 #[derive(Debug, Deserialize)]
 struct Commit {
@@ -51,6 +60,31 @@ fn parse_u128_with_underscores(s: &str) -> Result<u128, &'static str> {
     clean_string
         .parse::<u128>()
         .map_err(|_| "Invalid number format")
+}
+
+#[instrument(level = "trace", skip_all)]
+fn parse_rust_toolchain(s: &str) -> Result<String, &'static str> {
+    // Validate the format: must start with '+' followed by version or channel name
+    if !s.starts_with('+') {
+        return Err("Rust toolchain must start with '+' (e.g., '+stable', '+1.85.1', '+nightly')");
+    }
+
+    let toolchain = &s[1..];
+
+    // Check if it's a valid channel name or version format
+    if toolchain.is_empty() {
+        return Err("Rust toolchain cannot be empty after '+'");
+    }
+
+    // Basic validation: alphanumeric, dots, dashes, and hyphens are allowed
+    if !toolchain
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '.' || c == '-' || c == '_')
+    {
+        return Err("Invalid characters in Rust toolchain specification");
+    }
+
+    Ok(s.to_string())
 }
 
 #[instrument(level = "trace", skip_all)]
@@ -97,29 +131,35 @@ fn init_tracing(log_path: PathBuf) -> tracing_appender::non_blocking::WorkerGuar
 
     tracing_subscriber::registry()
         .with(
-            fmt::layer()
-                .without_time()
+            tracing_fmt::layer()
+                .event_format(AnsiPreservingFormatter::new(
+                    tracing_fmt::format()
+                        .without_time()
+                        .with_level(false)
+                        .with_target(false),
+                ))
+                .fmt_fields(PrettyFields::new().display_messages())
                 .with_writer(std::io::stdout)
                 .with_ansi(true)
-                .with_level(false)
-                .with_target(false)
-                .fmt_fields(fmt::format::PrettyFields::new())
                 .with_filter(stdout_filter),
         )
         .with(
-            fmt::layer()
-                .with_file(true)
-                .with_line_number(true)
-                .without_time()
+            tracing_fmt::layer()
+                .event_format(AnsiPreservingFormatter::new(
+                    tracing_fmt::format()
+                        .without_time()
+                        .with_level(true)
+                        .with_target(false)
+                        .with_file(true)
+                        .with_line_number(true),
+                ))
+                .fmt_fields(PrettyFields::new().display_messages())
                 .with_writer(std::io::stderr)
                 .with_ansi(true)
-                .with_level(true)
-                .with_target(false)
-                .fmt_fields(fmt::format::PrettyFields::new())
                 .with_filter(stderr_filter),
         )
         .with(
-            fmt::layer()
+            tracing_fmt::layer()
                 .with_writer(non_blocking)
                 .with_ansi(false)
                 .json()
@@ -247,6 +287,7 @@ async fn execute(
             let reproducible = matches.get_one::<bool>("REPRODUCIBLE").unwrap();
             let force = matches.get_one::<bool>("FORCE").unwrap();
             let verbose = matches.get_one::<bool>("VERBOSE").unwrap();
+            let toolchain = matches.get_one::<String>("TOOLCHAIN").unwrap();
 
             build::execute(
                 &package_dir,
@@ -267,6 +308,7 @@ async fn execute(
                 *force,
                 *verbose,
                 false,
+                toolchain,
             )
             .await
         }
@@ -312,6 +354,7 @@ async fn execute(
             let reproducible = matches.get_one::<bool>("REPRODUCIBLE").unwrap();
             let force = matches.get_one::<bool>("FORCE").unwrap();
             let verbose = matches.get_one::<bool>("VERBOSE").unwrap();
+            let toolchain = matches.get_one::<String>("TOOLCHAIN").unwrap();
 
             build_start_package::execute(
                 &package_dir,
@@ -331,6 +374,7 @@ async fn execute(
                 *reproducible,
                 *force,
                 *verbose,
+                toolchain,
             )
             .await
         }
@@ -468,9 +512,25 @@ async fn execute(
         }
         Some(("setup", matches)) => {
             let verbose = matches.get_one::<bool>("VERBOSE").unwrap();
+            let docker_optional = matches.get_one::<bool>("DOCKER_OPTIONAL").unwrap();
+            let python_optional = matches.get_one::<bool>("PYTHON_OPTIONAL").unwrap();
+            let foundry_optional = matches.get_one::<bool>("FOUNDRY_OPTIONAL").unwrap();
+            let javascript_optional = matches.get_one::<bool>("JAVASCRIPT_OPTIONAL").unwrap();
+            let non_interactive = matches.get_one::<bool>("NON_INTERACTIVE").unwrap();
+            let toolchain = matches.get_one::<String>("TOOLCHAIN").unwrap();
 
             let mut recv_kill = build::make_fake_kill_chan();
-            setup::execute(&mut recv_kill, *verbose).await
+            setup::execute(
+                &mut recv_kill,
+                *docker_optional,
+                *python_optional,
+                *foundry_optional,
+                *javascript_optional,
+                *non_interactive,
+                *verbose,
+                toolchain,
+            )
+            .await
         }
         Some(("start-package", matches)) => {
             let package_dir = PathBuf::from(matches.get_one::<String>("DIR").unwrap());
@@ -815,6 +875,14 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .help("If set, output stdout and stderr")
                 .required(false)
             )
+            .arg(Arg::new("TOOLCHAIN")
+                .action(ArgAction::Set)
+                .long("toolchain")
+                .help("Rust toolchain to use (e.g., '+stable', '+1.85.1', '+nightly')")
+                .default_value(build::DEFAULT_RUST_TOOLCHAIN)
+                .value_parser(clap::builder::ValueParser::new(parse_rust_toolchain))
+                .required(false)
+            )
         )
         .subcommand(Command::new("build-start-package")
             .about("Build and start a Hyperware package")
@@ -926,6 +994,14 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .short('v')
                 .long("verbose")
                 .help("If set, output stdout and stderr")
+                .required(false)
+            )
+            .arg(Arg::new("TOOLCHAIN")
+                .action(ArgAction::Set)
+                .long("toolchain")
+                .help("Rust toolchain to use (e.g., '+stable', '+1.85.1', '+nightly')")
+                .default_value(build::DEFAULT_RUST_TOOLCHAIN)
+                .value_parser(clap::builder::ValueParser::new(parse_rust_toolchain))
                 .required(false)
             )
         )
@@ -1092,7 +1168,7 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .short('t')
                 .long("template")
                 .help("Template to create")
-                .value_parser(["blank", "chat", "echo", "fibonacci", "file-transfer"])
+                .value_parser(["blank", "chat", "echo", "fibonacci", "file-transfer", "hyperapp-skeleton"])
                 .default_value("chat")
             )
             .arg(Arg::new("UI")
@@ -1247,6 +1323,48 @@ async fn make_app(current_dir: &std::ffi::OsString) -> Result<Command> {
                 .short('v')
                 .long("verbose")
                 .help("If set, output stdout and stderr")
+                .required(false)
+            )
+            .arg(Arg::new("DOCKER_OPTIONAL")
+                .action(ArgAction::SetTrue)
+                .short('d')
+                .long("docker-optional")
+                .help("If set, don't require Docker dep (just warn if missing)")
+                .required(false)
+            )
+            .arg(Arg::new("PYTHON_OPTIONAL")
+                .action(ArgAction::SetTrue)
+                .short('p')
+                .long("python-optional")
+                .help("If set, don't require Python dep (just warn if missing)")
+                .required(false)
+            )
+            .arg(Arg::new("FOUNDRY_OPTIONAL")
+                .action(ArgAction::SetTrue)
+                .short('f')
+                .long("foundry-optional")
+                .help("If set, don't require Foundry dep (just warn if missing)")
+                .required(false)
+            )
+            .arg(Arg::new("JAVASCRIPT_OPTIONAL")
+                .action(ArgAction::SetTrue)
+                .short('j')
+                .long("javascript-optional")
+                .help("If set, don't require Javascript deps (just warn if missing)")
+                .required(false)
+            )
+            .arg(Arg::new("NON_INTERACTIVE")
+                .action(ArgAction::SetTrue)
+                .long("non-interactive")
+                .help("If set, do not prompt and instead always reply `Y` to prompts (i.e. automatically install dependencies without user input)")
+                .required(false)
+            )
+            .arg(Arg::new("TOOLCHAIN")
+                .action(ArgAction::Set)
+                .long("toolchain")
+                .help("Rust toolchain to use (e.g., '+stable', '+1.85.1', '+nightly')")
+                .default_value(build::DEFAULT_RUST_TOOLCHAIN)
+                .value_parser(clap::builder::ValueParser::new(parse_rust_toolchain))
                 .required(false)
             )
         )

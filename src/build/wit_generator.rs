@@ -1,12 +1,18 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use color_eyre::{
     eyre::{bail, eyre, WrapErr},
     Result,
 };
-use syn::{self, Attribute, ImplItem, Item, Type};
+use syn::{
+    self,
+    parse::{Parse, ParseStream},
+    punctuated::Punctuated,
+    Attribute, Ident, ImplItem, Item, LitStr, Token, Type,
+};
 use toml::Value;
 use tracing::{debug, info, instrument, warn};
 use walkdir::WalkDir;
@@ -65,19 +71,13 @@ fn to_kebab_case(s: &str) -> String {
         return s.replace('_', "-");
     }
 
-    let mut result = String::with_capacity(s.len() + 5); // Extra capacity for hyphens
+    let mut result = String::with_capacity(s.len() + 10); // Extra capacity for hyphens
     let chars: Vec<char> = s.chars().collect();
 
     for (i, &c) in chars.iter().enumerate() {
         if c.is_uppercase() {
-            // Add hyphen if:
-            // 1. Not the first character
-            // 2. Previous character is lowercase
-            // 3. Or next character is lowercase (to handle acronyms like HTML)
-            if i > 0
-                && (chars[i - 1].is_lowercase()
-                    || (i < chars.len() - 1 && chars[i + 1].is_lowercase()))
-            {
+            // Add hyphen before each uppercase letter except at the beginning
+            if i > 0 {
                 result.push('-');
             }
             result.push(c.to_lowercase().next().unwrap());
@@ -98,13 +98,39 @@ fn to_wit_ident(kebab_name: &str) -> String {
     }
 }
 
+// Convert kebab-case to PascalCase
+fn to_pascal_case(s: &str) -> String {
+    s.split('-')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().chain(chars).collect(),
+            }
+        })
+        .collect()
+}
+
+// Convert kebab-case to snake_case
+fn kebab_to_snake_case(s: &str) -> String {
+    s.replace('-', "_")
+}
+
 // Validates a name doesn't contain numbers or "stream"
 fn validate_name(name: &str, kind: &str) -> Result<()> {
     // Check for numbers
     if name.chars().any(|c| c.is_digit(10)) {
         bail!(
-            "Error: {} name '{}' contains numbers, which is not allowed",
+            "{} name '{}' contains numbers, which are not allowed in WIT identifiers.\n\
+             \n\
+             WIT (WebAssembly Interface Types) has strict naming rules:\n\
+             - Names must contain only letters (a-z, A-Z), underscores (_), and hyphens (-)\n\
+             - Numbers are not permitted in identifiers\n\
+             \n\
+             Suggestion: Rename '{}' to use descriptive words instead of numbers.\n\
+             Examples: 'field1' → 'first_field', 'level2' → 'level_two', 'data3' → 'third_data'",
             kind,
+            name,
             name
         );
     }
@@ -112,7 +138,12 @@ fn validate_name(name: &str, kind: &str) -> Result<()> {
     // Check for "stream"
     if name.to_lowercase().contains("stream") {
         bail!(
-            "Error: {} name '{}' contains 'stream', which is not allowed",
+            "{} name '{}' contains 'stream', which is a reserved keyword in WIT.\n\
+             \n\
+             'stream' is reserved for future WIT streaming functionality and cannot be used in identifiers.\n\
+             \n\
+             Suggestion: Use an alternative term like 'flow', 'channel', 'pipeline', or 'sequence'.\n\
+             Examples: 'data_stream' → 'data_flow', 'stream_handler' → 'channel_handler'",
             kind,
             name
         );
@@ -142,11 +173,23 @@ fn remove_state_suffix(name: &str) -> String {
     name.to_string()
 }
 
-// Extract wit_world from the #[hyperprocess] attribute using the format in the debug representation
+/// Check if an attribute path refers to the hyperapp attribute.
+/// Matches both `#[hyperapp]` and `#[hyperapp_macro::hyperapp]`.
+fn is_hyperapp_attr(attr: &Attribute) -> bool {
+    let path = attr.path();
+    if path.is_ident("hyperapp") {
+        return true;
+    }
+    // Check for hyperapp_macro::hyperapp
+    let segments: Vec<_> = path.segments.iter().collect();
+    segments.len() == 2 && segments[0].ident == "hyperapp_macro" && segments[1].ident == "hyperapp"
+}
+
+// Extract wit_world from the #[hyperapp] attribute using the format in the debug representation
 #[instrument(level = "trace", skip_all)]
 fn extract_wit_world(attrs: &[Attribute]) -> Result<String> {
     for attr in attrs {
-        if attr.path().is_ident("hyperprocess") {
+        if is_hyperapp_attr(attr) {
             // Convert attribute to string representation
             let attr_str = format!("{:?}", attr);
             debug!(attr_str = %attr_str, "Attribute string");
@@ -170,7 +213,7 @@ fn extract_wit_world(attrs: &[Attribute]) -> Result<String> {
             }
         }
     }
-    bail!("wit_world not found in hyperprocess attribute")
+    bail!("wit_world not found in hyperapp attribute")
 }
 // Helper function to check if a WIT type name is a primitive or known built-in
 fn is_wit_primitive_or_builtin(type_name: &str) -> bool {
@@ -216,8 +259,14 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                 "u32" => Ok("u32".to_string()),
                 "i64" => Ok("s64".to_string()),
                 "u64" => Ok("u64".to_string()),
+                // WIT 1.0 does not support 128-bit integers. Represent these as strings
+                // to preserve full precision across language boundaries.
+                "i128" => Ok("string".to_string()),
+                "u128" => Ok("string".to_string()),
                 "f32" => Ok("f32".to_string()),
                 "f64" => Ok("f64".to_string()),
+                "usize" => Ok("u64".to_string()),
+                "isize" => Ok("s64".to_string()),
                 "String" => Ok("string".to_string()),
                 "bool" => Ok("bool".to_string()),
                 "Vec" => {
@@ -298,31 +347,47 @@ fn rust_type_to_wit(ty: &Type, used_types: &mut HashSet<String>) -> Result<Strin
                         Err(eyre!("Failed to parse Result type arguments"))
                     }
                 }
-                // TODO: fix and enable
-                //"HashMap" | "BTreeMap" => {
-                //    if let syn::PathArguments::AngleBracketed(args) =
-                //        &type_path.path.segments.last().unwrap().arguments
-                //    {
-                //        if args.args.len() >= 2 {
-                //            if let (
-                //                Some(syn::GenericArgument::Type(key_ty)),
-                //                Some(syn::GenericArgument::Type(val_ty)),
-                //            ) = (args.args.first(), args.args.get(1))
-                //            {
-                //                let key_type = rust_type_to_wit(key_ty, used_types)?;
-                //                let val_type = rust_type_to_wit(val_ty, used_types)?;
-                //                // For HashMaps, we'll generate a list of tuples where each tuple contains a key and value
-                //                Ok(format!("list<tuple<{}, {}>>", key_type, val_type))
-                //            } else {
-                //                Ok("list<tuple<string, any>>".to_string())
-                //            }
-                //        } else {
-                //            Ok("list<tuple<string, any>>".to_string())
-                //        }
-                //    } else {
-                //        Ok("list<tuple<string, any>>".to_string())
-                //    }
-                //}
+                "HashMap" | "BTreeMap" => {
+                    if let syn::PathArguments::AngleBracketed(args) =
+                        &type_path.path.segments.last().unwrap().arguments
+                    {
+                        if args.args.len() >= 2 {
+                            if let (
+                                Some(syn::GenericArgument::Type(key_ty)),
+                                Some(syn::GenericArgument::Type(val_ty)),
+                            ) = (args.args.first(), args.args.get(1))
+                            {
+                                let key_type = rust_type_to_wit(key_ty, used_types)?;
+                                let val_type = rust_type_to_wit(val_ty, used_types)?;
+                                // Defer alias/string validation to later verification.
+                                // Generate a tuple-backed representation using the key type name
+                                // (which may be an alias like `node-id`) and let the alias
+                                // definition resolve to `string`.
+                                Ok(format!("list<tuple<{}, {}>>", key_type, val_type))
+                            } else {
+                                bail!("Failed to parse HashMap generic arguments");
+                            }
+                        } else {
+                            bail!("HashMap requires two generic arguments <K, V>");
+                        }
+                    } else {
+                        bail!("Failed to parse HashMap generic arguments");
+                    }
+                }
+                "HashSet" | "BTreeSet" => {
+                    if let syn::PathArguments::AngleBracketed(args) =
+                        &type_path.path.segments.last().unwrap().arguments
+                    {
+                        if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                            let inner = rust_type_to_wit(inner_ty, used_types)?;
+                            Ok(format!("list<{}>", inner))
+                        } else {
+                            bail!("Failed to parse HashSet inner type");
+                        }
+                    } else {
+                        bail!("Failed to parse HashSet inner type");
+                    }
+                }
                 custom => {
                     // Validate custom type name
                     validate_name(custom, "Type")?;
@@ -455,10 +520,17 @@ fn generate_signature_struct(
 
     // For HTTP endpoints, try to extract method and path from attribute
     if attr_type == "http" {
-        if let Some((http_method, http_path)) = extract_http_info(&method.attrs)? {
-            comment.push_str(&format!("\n    // HTTP: {} {}", http_method, http_path));
+        if let Some(info) = extract_http_info(&method.attrs)? {
+            let method_comment = info.method.unwrap_or_else(|| "POST".to_string());
+            let mut path_comment = info.path.unwrap_or_else(|| format!("/api/{}", kebab_name));
+            if !path_comment.starts_with('/') {
+                path_comment = format!("/{}", path_comment.trim_start_matches('/'));
+            }
+            comment.push_str(&format!(
+                "\n    // HTTP: {} {}",
+                method_comment, path_comment
+            ));
         } else {
-            // Default path if not specified
             comment.push_str(&format!("\n    // HTTP: POST /api/{}", kebab_name));
         }
     }
@@ -474,7 +546,10 @@ fn generate_signature_struct(
         struct_fields.push("        target: address".to_string());
     }
 
-    // Process function parameters (skip &self and &mut self)
+    // Collect function parameters (skip &self and &mut self) into a tuple
+    // This preserves ordering for LLM consumption (JSON objects don't guarantee order)
+    let mut param_names_and_types: Vec<(String, String)> = Vec::new();
+
     for arg in &method.sig.inputs {
         if let syn::FnArg::Typed(pat_type) = arg {
             if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
@@ -485,38 +560,79 @@ fn generate_signature_struct(
 
                 // Get original param name
                 let param_orig_name = pat_ident.ident.to_string();
-                let method_name_for_error = method.sig.ident.to_string(); // Get method name for error messages
 
                 // Validate parameter name
                 match validate_name(&param_orig_name, "Parameter") {
                     Ok(_) => {
                         let stripped_param_name =
-                            check_and_strip_leading_underscore(param_orig_name.clone()); // Clone needed
+                            check_and_strip_leading_underscore(param_orig_name.clone());
                         let param_name = to_kebab_case(&stripped_param_name);
                         let param_wit_ident = to_wit_ident(&param_name);
 
                         // Rust type to WIT type
                         match rust_type_to_wit(&pat_type.ty, used_types) {
                             Ok(param_type) => {
-                                // Add field directly to the struct
-                                struct_fields
-                                    .push(format!("        {}: {}", param_wit_ident, param_type));
+                                param_names_and_types.push((param_wit_ident, param_type));
                             }
                             Err(e) => {
-                                // Wrap parameter type conversion error with context
-                                return Err(e.wrap_err(format!(
-                                    "Failed to convert type for parameter '{}' in function '{}'",
-                                    param_orig_name, method_name_for_error
-                                )));
+                                return Err(e);
                             }
                         }
                     }
                     Err(e) => {
-                        // Return the error directly
                         return Err(e);
                     }
                 }
             }
+        }
+    }
+
+    // Generate arg-types tuple to preserve ordering for LLM consumption
+    // The args comment goes above the record to document the full signature with names
+    if !param_names_and_types.is_empty() {
+        let args_doc: Vec<String> = param_names_and_types
+            .iter()
+            .map(|(name, ty)| format!("{}: {}", name, ty))
+            .collect();
+
+        let tuple_types: Vec<&str> = param_names_and_types
+            .iter()
+            .map(|(_, ty)| ty.as_str())
+            .collect();
+
+        // Add args comment above the record (appended to the function comment)
+        comment.push_str(&format!("\n    // args: ({})", args_doc.join(", ")));
+
+        // Add JSON format comment for local and remote endpoints
+        if attr_type == "local" || attr_type == "remote" {
+            let pascal_name = to_pascal_case(kebab_name);
+            let snake_params: Vec<String> = param_names_and_types
+                .iter()
+                .map(|(name, _)| kebab_to_snake_case(name))
+                .collect();
+            // Single arg: no array brackets, multiple args: use array
+            let args_fmt = if snake_params.len() == 1 {
+                snake_params[0].clone()
+            } else {
+                format!("[{}]", snake_params.join(", "))
+            };
+            comment.push_str(&format!(
+                "\n    // json fmt: {{\"{}\": {}}}",
+                pascal_name, args_fmt
+            ));
+        }
+
+        struct_fields.push(format!(
+            "        arg-types: tuple<{}>",
+            tuple_types.join(", ")
+        ));
+    } else {
+        comment.push_str("\n    // args: none");
+
+        // Add JSON format comment for local and remote endpoints with no args
+        if attr_type == "local" || attr_type == "remote" {
+            let pascal_name = to_pascal_case(kebab_name);
+            comment.push_str(&format!("\n    // json fmt: {{\"{}\": null}}", pascal_name));
         }
     }
 
@@ -567,52 +683,67 @@ fn generate_signature_struct(
     Ok(record_def)
 }
 
+#[derive(Default, Debug, Clone)]
+struct HttpAttrInfo {
+    method: Option<String>,
+    path: Option<String>,
+}
+
+struct HttpKeyValue {
+    key: Ident,
+    _eq_token: Token![=],
+    value: LitStr,
+}
+
+impl Parse for HttpKeyValue {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        Ok(Self {
+            key: input.parse()?,
+            _eq_token: input.parse()?,
+            value: input.parse()?,
+        })
+    }
+}
+
 // Helper function to extract HTTP method and path from [http] attribute
 #[instrument(level = "trace", skip_all)]
-fn extract_http_info(attrs: &[Attribute]) -> Result<Option<(String, String)>> {
+fn extract_http_info(attrs: &[Attribute]) -> Result<Option<HttpAttrInfo>> {
     for attr in attrs {
         if attr.path().is_ident("http") {
-            // Convert attribute to string representation for parsing
-            let attr_str = format!("{:?}", attr);
-            debug!(attr_str = %attr_str, "HTTP attribute string");
+            match &attr.meta {
+                syn::Meta::Path(_) => {
+                    return Ok(Some(HttpAttrInfo::default()));
+                }
+                syn::Meta::List(list) => {
+                    let parser = Punctuated::<HttpKeyValue, Token![,]>::parse_terminated;
+                    let parsed = list.parse_args_with(parser);
 
-            let mut method = None;
-            let mut path = None;
-
-            // Look for method parameter
-            if let Some(method_pos) = attr_str.find("method") {
-                if let Some(eq_pos) = attr_str[method_pos..].find('=') {
-                    let start_pos = method_pos + eq_pos + 1;
-                    // Find the quoted value
-                    if let Some(quote_start) = attr_str[start_pos..].find('"') {
-                        let value_start = start_pos + quote_start + 1;
-                        if let Some(quote_end) = attr_str[value_start..].find('"') {
-                            method =
-                                Some(attr_str[value_start..value_start + quote_end].to_string());
+                    match parsed {
+                        Ok(args) => {
+                            let mut info = HttpAttrInfo::default();
+                            for kv in args {
+                                let key = kv.key.to_string();
+                                let value = kv.value.value();
+                                match key.as_str() {
+                                    "method" => info.method = Some(value.to_uppercase()),
+                                    "path" => info.path = Some(value),
+                                    other => {
+                                        warn!(key = %other, "Unknown parameter in #[http] attribute")
+                                    }
+                                }
+                            }
+                            return Ok(Some(info));
+                        }
+                        Err(err) => {
+                            return Err(err)
+                                .wrap_err("Failed to parse #[http] attribute arguments");
                         }
                     }
                 }
-            }
-
-            // Look for path parameter
-            if let Some(path_pos) = attr_str.find("path") {
-                if let Some(eq_pos) = attr_str[path_pos..].find('=') {
-                    let start_pos = path_pos + eq_pos + 1;
-                    // Find the quoted value
-                    if let Some(quote_start) = attr_str[start_pos..].find('"') {
-                        let value_start = start_pos + quote_start + 1;
-                        if let Some(quote_end) = attr_str[value_start..].find('"') {
-                            path = Some(attr_str[value_start..value_start + quote_end].to_string());
-                        }
-                    }
+                syn::Meta::NameValue(_) => {
+                    warn!("Unexpected name-value form for #[http] attribute");
+                    return Ok(Some(HttpAttrInfo::default()));
                 }
-            }
-
-            // If we found at least one parameter, return the info
-            if method.is_some() || path.is_some() {
-                let final_method = method.unwrap_or_else(|| "POST".to_string());
-                let final_path = path.unwrap_or_else(|| "/api".to_string());
-                return Ok(Some((final_method, final_path)));
             }
         }
     }
@@ -634,8 +765,243 @@ impl AsTypePath for syn::Type {
 }
 
 // Helper function to collect all type definitions from a file
+// Collect a single type definition from a file
 #[instrument(level = "trace", skip_all)]
-fn collect_type_definitions_from_file(
+fn collect_single_type_definition(
+    file_path: &Path,
+    target_type_kebab: &str, // The kebab-case type name we're looking for
+) -> Result<Option<(String, HashSet<String>)>> {
+    // Returns (WIT definition, dependencies)
+    debug!(file_path = %file_path.display(), target_type = %target_type_kebab, "Looking for type in file");
+
+    let content = fs::read_to_string(file_path)
+        .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
+
+    let ast = syn::parse_file(&content)
+        .with_context(|| format!("Failed to parse file: {}", file_path.display()))?;
+
+    let mut dependencies = HashSet::new();
+
+    for item in &ast.items {
+        match item {
+            Item::Struct(s) => {
+                let name = s.ident.to_string();
+                // Skip internal types
+                if name.contains("__") {
+                    continue;
+                }
+
+                let kebab_name = to_kebab_case(&name);
+                debug!(struct_name = %name, kebab_name = %kebab_name, target = %target_type_kebab, "Checking struct");
+                if kebab_name != target_type_kebab {
+                    continue; // Not the type we're looking for
+                }
+
+                // Found the type! Generate its WIT definition
+                return generate_struct_wit_definition(s, &name, &kebab_name, &mut dependencies)
+                    .map(|wit_def| Some((wit_def, dependencies)));
+            }
+            Item::Enum(e) => {
+                let name = e.ident.to_string();
+                // Skip internal types
+                if name.contains("__") {
+                    continue;
+                }
+
+                let kebab_name = to_kebab_case(&name);
+                if kebab_name != target_type_kebab {
+                    continue; // Not the type we're looking for
+                }
+
+                // Found the type! Generate its WIT definition
+                return generate_enum_wit_definition(e, &name, &kebab_name, &mut dependencies)
+                    .map(|wit_def| Some((wit_def, dependencies)));
+            }
+            Item::Type(t) => {
+                let alias_name = t.ident.to_string();
+                // Skip internal types
+                if alias_name.contains("__") {
+                    continue;
+                }
+
+                let kebab_name = to_kebab_case(&alias_name);
+                if kebab_name != target_type_kebab {
+                    continue;
+                }
+
+                // Build alias: type <kebab> = <rhs>
+                let rhs = rust_type_to_wit(&t.ty, &mut dependencies)?;
+                let def = format!("type {} = {};", to_wit_ident(&kebab_name), rhs);
+                return Ok(Some((def, dependencies)));
+            }
+            _ => {}
+        }
+    }
+
+    Ok(None) // Type not found in this file
+}
+
+// Helper function to generate WIT definition for a struct
+fn generate_struct_wit_definition(
+    s: &syn::ItemStruct,
+    name: &str,
+    kebab_name: &str,
+    dependencies: &mut HashSet<String>,
+) -> Result<String> {
+    // Validate name
+    if let Err(e) = validate_name(&name, "Struct") {
+        return Err(e);
+    }
+
+    // Generate WIT definition for this struct
+    let fields_result: Result<Vec<String>> = match &s.fields {
+        syn::Fields::Named(fields) => {
+            let mut field_strings = Vec::new();
+            for f in &fields.named {
+                if let Some(field_ident) = &f.ident {
+                    let field_orig_name = field_ident.to_string();
+                    let stripped_field_orig_name =
+                        check_and_strip_leading_underscore(field_orig_name.clone());
+
+                    if let Err(e) = validate_name(&stripped_field_orig_name, "Field") {
+                        // Return the validation error directly to preserve the helpful message
+                        return Err(e);
+                    }
+
+                    let field_kebab_name = to_kebab_case(&stripped_field_orig_name);
+                    let wit_type = rust_type_to_wit(&f.ty, dependencies)?;
+                    field_strings.push(format!(
+                        "{}: {}",
+                        to_wit_ident(&field_kebab_name),
+                        wit_type
+                    ));
+                }
+            }
+            Ok(field_strings)
+        }
+        syn::Fields::Unnamed(fields) => {
+            // Support 1-tuple (newtype) structs by emitting a WIT type alias.
+            if fields.unnamed.len() == 1 {
+                let inner = &fields.unnamed[0];
+                let wit_type = rust_type_to_wit(&inner.ty, dependencies)?;
+                return Ok(format!(
+                    "type {} = {};",
+                    to_wit_ident(&kebab_name),
+                    wit_type
+                ));
+            } else {
+                bail!(
+                    "Struct '{}' has {} unnamed (tuple-style) fields, which are not supported in WIT. \
+                     Only newtype (single-field) tuple structs are supported as type aliases.",
+                    name,
+                    fields.unnamed.len()
+                );
+            }
+        }
+        syn::Fields::Unit => {
+            // Unit struct becomes an empty record
+            Ok(vec![])
+        }
+    };
+
+    let fields = fields_result?;
+
+    if fields.is_empty() {
+        Ok(format!("record {} {{}}", to_wit_ident(&kebab_name)))
+    } else {
+        let indented_fields = fields
+            .iter()
+            .map(|f| format!("    {}", f))
+            .collect::<Vec<_>>()
+            .join(",\n");
+        Ok(format!(
+            "record {} {{\n{}\n}}",
+            to_wit_ident(&kebab_name),
+            indented_fields
+        ))
+    }
+}
+
+// Helper function to generate WIT definition for an enum
+fn generate_enum_wit_definition(
+    e: &syn::ItemEnum,
+    name: &str,
+    kebab_name: &str,
+    dependencies: &mut HashSet<String>,
+) -> Result<String> {
+    // Validate name
+    if let Err(e) = validate_name(&name, "Enum") {
+        return Err(e);
+    }
+
+    let mut wit_fields = Vec::new();
+    let mut is_simple_enum = true;
+
+    for v in &e.variants {
+        let variant_orig_name = v.ident.to_string();
+
+        if let Err(e) = validate_name(&variant_orig_name, "Variant") {
+            return Err(e);
+        }
+
+        let variant_kebab_name = to_kebab_case(&variant_orig_name);
+
+        match &v.fields {
+            syn::Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+                is_simple_enum = false;
+                let field = fields.unnamed.first().unwrap();
+                let wit_type = rust_type_to_wit(&field.ty, dependencies)?;
+                wit_fields.push(format!(
+                    "{}({})",
+                    to_wit_ident(&variant_kebab_name),
+                    wit_type
+                ));
+            }
+            syn::Fields::Unit => {
+                wit_fields.push(to_wit_ident(&variant_kebab_name));
+            }
+            syn::Fields::Named(_) => {
+                bail!(
+                    "Enum '{}' has variant '{}' with struct-like fields {{ ... }}, which is not supported in WIT. \
+                     WIT variants can only have unnamed single-value data or no data at all. \
+                     Consider refactoring to use a separate struct type or a single unnamed field.",
+                    name, variant_orig_name
+                );
+            }
+            syn::Fields::Unnamed(fields) => {
+                bail!(
+                    "Enum '{}' has variant '{}' with {} unnamed fields, which is not supported in WIT. \
+                     WIT variants can only have a single unnamed field. \
+                     Consider wrapping multiple fields in a struct or tuple type.",
+                    name, variant_orig_name, fields.unnamed.len()
+                );
+            }
+        }
+    }
+
+    let keyword = if is_simple_enum { "enum" } else { "variant" };
+
+    if wit_fields.is_empty() {
+        Ok(format!("{} {} {{}}", keyword, to_wit_ident(&kebab_name)))
+    } else {
+        let indented_fields = wit_fields
+            .iter()
+            .map(|f| format!("    {}", f))
+            .collect::<Vec<_>>()
+            .join(",\n");
+        Ok(format!(
+            "{} {} {{\n{}\n}}",
+            keyword,
+            to_wit_ident(&kebab_name),
+            indented_fields
+        ))
+    }
+}
+
+// Removed unused function collect_type_definitions_from_file
+// This function was not being called anywhere in the codebase
+#[allow(dead_code)]
+fn _collect_type_definitions_from_file(
     file_path: &Path,
     type_definitions: &mut HashMap<String, String>, // kebab-name -> WIT definition
 ) -> Result<()> {
@@ -661,8 +1027,7 @@ fn collect_type_definitions_from_file(
 
                 // Validate name
                 if let Err(e) = validate_name(&name, "Struct") {
-                    warn!(name = %name, error = %e, "Skipping struct with invalid name");
-                    continue;
+                    return Err(e.wrap_err(format!("Invalid struct name '{}'", name)));
                 }
 
                 let kebab_name = to_kebab_case(&name);
@@ -678,8 +1043,7 @@ fn collect_type_definitions_from_file(
                                     check_and_strip_leading_underscore(field_orig_name.clone());
 
                                 if let Err(e) = validate_name(&stripped_field_orig_name, "Field") {
-                                    warn!(field_name = %field_orig_name, error = %e, "Skipping field with invalid name");
-                                    continue;
+                                    return Err(e);
                                 }
 
                                 let field_kebab_name = to_kebab_case(&stripped_field_orig_name);
@@ -697,7 +1061,6 @@ fn collect_type_definitions_from_file(
                                         ));
                                     }
                                     Err(e) => {
-                                        warn!(field = %field_orig_name, error = %e, "Failed to convert field type");
                                         return Err(e.wrap_err(format!(
                                             "Failed to convert field '{}' in struct '{}'",
                                             field_orig_name, name
@@ -710,8 +1073,12 @@ fn collect_type_definitions_from_file(
                     }
                     syn::Fields::Unit => Ok(Vec::new()),
                     syn::Fields::Unnamed(_) => {
-                        warn!(struct_name = %name, "Skipping tuple struct");
-                        continue;
+                        bail!(
+                            "Struct '{}' is a tuple struct, which is not supported in WIT. \
+                             WIT only supports record types with named fields. \
+                             Consider converting to a struct with named fields.",
+                            name
+                        );
                     }
                 };
 
@@ -730,7 +1097,7 @@ fn collect_type_definitions_from_file(
                         type_definitions.insert(kebab_name, definition);
                     }
                     Err(e) => {
-                        warn!(struct_name = %name, error = %e, "Failed to process struct");
+                        return Err(e);
                     }
                 }
             }
@@ -743,20 +1110,16 @@ fn collect_type_definitions_from_file(
 
                 // Validate name
                 if let Err(e) = validate_name(&name, "Enum") {
-                    warn!(name = %name, error = %e, "Skipping enum with invalid name");
-                    continue;
+                    return Err(e.wrap_err(format!("Invalid enum name '{}'", name)));
                 }
 
                 let kebab_name = to_kebab_case(&name);
                 let mut variants_wit = Vec::new();
-                let mut skip_enum = false;
 
                 for v in &e.variants {
                     let variant_orig_name = v.ident.to_string();
                     if let Err(e) = validate_name(&variant_orig_name, "Enum variant") {
-                        warn!(variant = %variant_orig_name, error = %e, "Skipping variant with invalid name");
-                        skip_enum = true;
-                        break;
+                        return Err(e);
                     }
 
                     let variant_kebab_name = to_kebab_case(&variant_orig_name);
@@ -775,24 +1138,38 @@ fn collect_type_definitions_from_file(
                                     ));
                                 }
                                 Err(e) => {
-                                    warn!(variant = %variant_orig_name, error = %e, "Failed to convert variant type");
-                                    skip_enum = true;
-                                    break;
+                                    return Err(e.wrap_err(format!(
+                                        "Failed to convert type for variant '{}' in enum '{}'",
+                                        variant_orig_name, name
+                                    )));
                                 }
                             }
                         }
                         syn::Fields::Unit => {
                             variants_wit.push(format!("        {}", variant_wit_ident));
                         }
-                        _ => {
-                            warn!(enum_name = %kebab_name, variant_name = %variant_orig_name, "Skipping complex enum variant");
-                            skip_enum = true;
-                            break;
+                        syn::Fields::Named(_) => {
+                            // Struct-like enum variants with named fields are not supported in WIT
+                            bail!(
+                                "Enum '{}' has variant '{}' with struct-like fields {{ ... }}, which is not supported in WIT. \
+                                 WIT variants can only have unnamed single-value data or no data at all. \
+                                 Consider refactoring to use a separate struct type or a single unnamed field.",
+                                name, variant_orig_name
+                            );
+                        }
+                        syn::Fields::Unnamed(fields) => {
+                            // Multiple unnamed fields (tuple variant with more than 1 field)
+                            bail!(
+                                "Enum '{}' has variant '{}' with {} unnamed fields, which is not supported in WIT. \
+                                 WIT variants can only have a single unnamed field. \
+                                 Consider wrapping multiple fields in a struct or tuple type.",
+                                name, variant_orig_name, fields.unnamed.len()
+                            );
                         }
                     }
                 }
 
-                if !skip_enum && !variants_wit.is_empty() {
+                if !variants_wit.is_empty() {
                     let wit_ident = to_wit_ident(&kebab_name);
                     let definition = format!(
                         "    variant {} {{\n{}\n    }}",
@@ -831,44 +1208,39 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
             project_path.display()
         )
     })?;
-    let ast = syn::parse_file(&lib_content).with_context(|| {
-        format!(
-            "Failed to parse lib.rs for project: {}",
-            project_path.display()
-        )
+    let ast = syn::parse_file(&lib_content).map_err(|parse_err| {
+        let mut report_msg = format!(
+            "Failed to parse lib.rs for project: {}: {}",
+            project_path.display(),
+            parse_err
+        );
+        if let Ok(output) = Command::new("cargo")
+            .arg("check")
+            .current_dir(project_path)
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            report_msg.push_str(&format!("\n\ncargo check stdout:\n{}", stdout));
+            report_msg.push_str(&format!("\n\ncargo check stderr:\n{}", stderr));
+        }
+        eyre!(report_msg)
     })?;
 
-    // --- PASS 1: Collect ALL type definitions from all files first ---
-    debug!("Pass 1: Collecting all type definitions from project files");
-    let mut all_type_definitions = HashMap::new();
-
-    for file_path in &rust_files {
-        if let Err(e) = collect_type_definitions_from_file(file_path, &mut all_type_definitions) {
-            // Log the error but continue processing other files
-            warn!(file = %file_path.display(), error = %e, "Failed to collect types from file, continuing");
-        }
-    }
-
-    debug!(count = %all_type_definitions.len(), "Collected type definitions in Pass 1");
-
-    // --- 2. Find Hyperprocess Impl Block & Extract Metadata ---
+    // --- PASS 1: Find Hyperprocess Impl Block & Extract Handler Signatures ---
     let mut wit_world = None;
     let mut interface_name = None; // Original Rust name (e.g., MyProcessState)
     let mut kebab_interface_name = None; // Kebab-case name (e.g., my-process)
-    let mut impl_item_with_hyperprocess = None;
+    let mut impl_item_with_hyperapp = None;
 
-    debug!("Scanning lib.rs for impl block with #[hyperprocess] attribute");
+    debug!("Scanning lib.rs for impl block with #[hyperapp] attribute");
     for item in &ast.items {
         if let Item::Impl(impl_item) = item {
-            if let Some(attr) = impl_item
-                .attrs
-                .iter()
-                .find(|a| a.path().is_ident("hyperprocess"))
-            {
-                debug!("Found #[hyperprocess] attribute");
+            if let Some(attr) = impl_item.attrs.iter().find(|a| is_hyperapp_attr(a)) {
+                debug!("Found #[hyperapp] attribute");
                 // Attempt to extract wit_world. Propagate error if extraction fails.
                 let world_name = extract_wit_world(&[attr.clone()])
-                    .wrap_err("Failed to extract wit_world from #[hyperprocess] attribute")?;
+                    .wrap_err("Failed to extract wit_world from #[hyperapp] attribute")?;
                 debug!(wit_world = %world_name, "Extracted wit_world");
                 wit_world = Some(world_name);
 
@@ -886,41 +1258,44 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                             let base_name = remove_state_suffix(name);
                             kebab_interface_name = Some(to_kebab_case(&base_name));
                             debug!(interface_name = %name, base_name = %base_name, kebab_name = ?kebab_interface_name, "Interface details");
-                            impl_item_with_hyperprocess = Some(impl_item.clone());
+                            impl_item_with_hyperapp = Some(impl_item.clone());
                             break; // Found the target impl block
                         }
                         Err(e) => {
                             // Escalate errors for invalid interface names instead of just warning
                             return Err(e.wrap_err(format!(
-                                "Invalid interface name '{}' in hyperprocess impl block",
+                                "Invalid interface name '{}' in hyperapp impl block",
                                 name
                             )));
                         }
                     }
                 } else {
                     // If interface name couldn't be extracted, it's an error for this project.
-                    bail!("Could not extract interface name from #[hyperprocess] impl block type: {:?}", impl_item.self_ty);
+                    bail!(
+                        "Could not extract interface name from #[hyperapp] impl block type: {:?}",
+                        impl_item.self_ty
+                    );
                 }
             }
         }
     }
 
-    // Exit early if no valid hyperprocess impl block was identified
-    let Some(ref impl_item) = impl_item_with_hyperprocess else {
+    // Exit early if no valid hyperapp impl block was identified
+    let Some(ref impl_item) = impl_item_with_hyperapp else {
         // If we looped through everything and didn't find a block (and didn't error above),
-        // it means no #[hyperprocess] attribute was found at all. This is okay, just skip.
-        warn!(project_path=%project_path.display(), "No #[hyperprocess] impl block found in lib.rs, skipping project");
+        // it means no #[hyperapp] attribute was found at all. This is okay, just skip.
+        warn!(project_path=%project_path.display(), "No #[hyperapp] impl block found in lib.rs, skipping project");
         return Ok(None);
     };
     // These unwraps are safe due to the checks above ensuring we error or break successfully
     let kebab_name = kebab_interface_name.as_ref().unwrap();
     let current_wit_world = wit_world.as_ref().unwrap();
 
-    // --- PASS 2: Process signatures and collect used types ---
+    // --- PASS 2: Process signatures and collect directly used types ---
     let mut signature_structs = Vec::new(); // Stores WIT string for each signature record
     let mut global_used_types = HashSet::new(); // All custom WIT types encountered (kebab-case)
 
-    debug!("Pass 2: Analyzing functions in hyperprocess impl block");
+    debug!("Pass 2: Analyzing functions in hyperapp impl block");
     for item in &impl_item.items {
         if let ImplItem::Fn(method) = item {
             let method_name = method.sig.ident.to_string();
@@ -991,9 +1366,9 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     signature_structs.push(sig_struct);
                 }
             } else {
-                // Method in hyperprocess impl lacks required attribute - Error
+                // Method in hyperapp impl lacks required attribute - Error
                 return Err(eyre!(
-                         "Method '{}' in the #[hyperprocess] impl block is missing a required attribute ([remote], [local], [http], [init], [ws], [ws_client] or [eth]). Only methods with these attributes should be included.",
+                         "Method '{}' in the #[hyperapp] impl block is missing a required attribute ([remote], [local], [http], [init], [ws], [ws_client] or [eth]). Only methods with these attributes should be included.",
                          method_name
                      ));
             }
@@ -1001,8 +1376,89 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     }
     debug!(signature_count = %signature_structs.len(), initial_used_types = ?global_used_types, "Completed signature analysis");
 
-    // --- 3. Build dependency graph and topologically sort types ---
-    debug!("Building type dependency graph");
+    // --- PASS 3: Collect type definitions ONLY for used types and their dependencies ---
+    debug!("Pass 3: Collecting type definitions for used types");
+    debug!("Rust files found: {:?}", rust_files);
+    debug!("Types to collect: {:?}", global_used_types);
+    let mut all_type_definitions = HashMap::new();
+    let mut types_to_collect = global_used_types
+        .iter()
+        .filter(|ty| !is_wit_primitive_or_builtin(ty))
+        .cloned()
+        .collect::<HashSet<String>>();
+    let mut collected_types = HashSet::new();
+    // Track every custom type referenced directly or via dependencies
+    let mut transitively_used_types: HashSet<String> = HashSet::new();
+
+    // Iteratively collect type definitions and their dependencies
+    while !types_to_collect.is_empty() {
+        // Convert to sorted Vec for deterministic iteration order
+        let mut current_batch: Vec<String> = types_to_collect.iter().cloned().collect();
+        current_batch.sort();
+        types_to_collect.clear();
+
+        for type_name in current_batch {
+            if collected_types.contains(&type_name) {
+                continue;
+            }
+
+            // Try to find and collect this type definition from the source files
+            let mut found = false;
+            for file_path in &rust_files {
+                match collect_single_type_definition(file_path, &type_name) {
+                    Ok(Some((wit_def, dependencies))) => {
+                        found = true;
+                        all_type_definitions.insert(type_name.clone(), wit_def);
+                        collected_types.insert(type_name.clone());
+
+                        // Add dependencies to be collected
+                        for dep in dependencies {
+                            transitively_used_types.insert(dep.clone());
+                            if !is_wit_primitive_or_builtin(&dep) && !collected_types.contains(&dep)
+                            {
+                                types_to_collect.insert(dep);
+                            }
+                        }
+                        break; // Found the type, no need to check other files
+                    }
+                    Ok(None) => {
+                        // Type not in this file, continue searching
+                    }
+                    Err(e) => {
+                        // Type was found but has an error (e.g., incompatible enum variant)
+                        // Propagate this error immediately
+                        return Err(e);
+                    }
+                }
+            }
+
+            if !found {
+                // Type not found in any file - this could be an issue
+                debug!(type_name = %type_name, "Type not found in any source file");
+            }
+        }
+    }
+
+    debug!(collected_count = %all_type_definitions.len(), "Collected type definitions in Pass 3");
+
+    // Merge direct and transitive used type sets for alias inference and verification
+    let mut all_used_types: HashSet<String> = global_used_types.clone();
+    all_used_types.extend(transitively_used_types.into_iter());
+
+    // Minimal inference: only add alias for `value` when used.
+    let mut inferred_aliases: Vec<String> = Vec::new();
+    let mut inferred_types: HashSet<String> = HashSet::new();
+    if all_used_types.contains("value") && !all_type_definitions.contains_key("value") {
+        inferred_aliases.push(
+            "// Arbitrary JSON value; encoded as string for WIT 1.0 (TS: unknown, Rust: serde_json::Value)"
+                .to_string(),
+        );
+        inferred_aliases.push(format!("type {} = string;", to_wit_ident("value")));
+        inferred_types.insert("value".to_string());
+    }
+
+    // --- 4. Build dependency graph and topologically sort types ---
+    debug!("Pass 4: Building type dependency graph");
 
     // Build a dependency map: type -> types it depends on
     let mut type_dependencies: HashMap<String, Vec<String>> = HashMap::new();
@@ -1012,6 +1468,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         .filter(|ty| !is_wit_primitive_or_builtin(ty))
         .cloned()
         .collect();
+    // Sort in descending order so pop() returns items in ascending alphabetical order
+    to_process.sort_by(|a, b| b.cmp(a));
 
     // First pass: collect all needed types and their dependencies
     while let Some(type_name) = to_process.pop() {
@@ -1026,13 +1484,17 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
             // Extract nested type dependencies from the WIT definition
             // Look for other custom types referenced in this definition
-            for (other_type_name, _) in &all_type_definitions {
+            let mut type_def_keys: Vec<_> = all_type_definitions.keys().collect();
+            type_def_keys.sort();
+            for other_type_name in type_def_keys {
                 if other_type_name != &type_name && wit_def.contains(other_type_name) {
                     deps.push(other_type_name.clone());
                     if !needed_types.contains(other_type_name)
                         && !to_process.contains(other_type_name)
                     {
                         to_process.push(other_type_name.clone());
+                        // Re-sort in descending order for deterministic output
+                        to_process.sort_by(|a, b| b.cmp(a));
                     }
                 }
             }
@@ -1046,8 +1508,10 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     let mut sorted_types = Vec::new();
     let mut in_degree: HashMap<String, usize> = HashMap::new();
 
-    // Initialize in-degrees
-    for type_name in &needed_types {
+    // Initialize in-degrees (sort for deterministic order)
+    let mut needed_types_sorted: Vec<String> = needed_types.iter().cloned().collect();
+    needed_types_sorted.sort();
+    for type_name in &needed_types_sorted {
         in_degree.insert(type_name.clone(), 0);
     }
 
@@ -1066,6 +1530,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         .filter(|(_, &degree)| degree == 0)
         .map(|(name, _)| name.clone())
         .collect();
+    // Sort in descending order so pop() returns items in ascending alphabetical order
+    queue.sort_by(|a, b| b.cmp(a));
 
     // Process queue
     while let Some(type_name) = queue.pop() {
@@ -1078,6 +1544,8 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
                     *degree -= 1;
                     if *degree == 0 {
                         queue.push(dep.clone());
+                        // Re-sort in descending order for deterministic output
+                        queue.sort_by(|a, b| b.cmp(a));
                     }
                 }
             }
@@ -1086,11 +1554,13 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
     // Check for cycles
     if sorted_types.len() != needed_types.len() {
-        let missing: Vec<String> = needed_types
+        let mut missing: Vec<String> = needed_types
             .iter()
             .filter(|t| !sorted_types.contains(t))
             .cloned()
             .collect();
+        // Sort for deterministic output order
+        missing.sort();
         warn!(missing = ?missing, "Circular dependency detected in type definitions");
         // Add remaining types anyway (WIT might still work)
         for t in missing {
@@ -1100,12 +1570,13 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
 
     debug!(sorted_count = %sorted_types.len(), "Completed topological sort");
 
-    // --- 4. Verify All Used Types Have Definitions ---
+    // --- 5. Verify All Used Types Have Definitions ---
     debug!(final_used_types = ?global_used_types, available_definitions = ?all_type_definitions.keys(), "Starting final verification");
     let mut undefined_types = Vec::new();
-    for used_type_name in &global_used_types {
+    for used_type_name in &all_used_types {
         if !is_wit_primitive_or_builtin(used_type_name)
             && !all_type_definitions.contains_key(used_type_name)
+            && !inferred_types.contains(used_type_name)
         {
             warn!(type_name=%used_type_name, "Verification failed: Used type has no generated definition.");
             undefined_types.push(used_type_name.clone());
@@ -1127,7 +1598,7 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
     }
     debug!("Verification successful: All used types have definitions or are built-in.");
 
-    // --- 5. Generate Final WIT Interface File ---
+    // --- 6. Generate Final WIT Interface File ---
     // Use topologically sorted types to ensure definitions come before uses
     let mut relevant_defs: Vec<String> = Vec::new();
     for type_name in &sorted_types {
@@ -1154,18 +1625,45 @@ fn process_rust_project(project_path: &Path, api_dir: &Path) -> Result<Option<(S
         // Add standard imports (can be refined based on actual needs)
         content.push_str("    use standard.{address};\n"); // Assuming world includes 'standard'
 
-        // Add type definitions
+        // Add inferred aliases (if any)
+        if !inferred_aliases.is_empty() {
+            content.push('\n');
+            for line in &inferred_aliases {
+                content.push_str("    ");
+                content.push_str(line);
+                content.push('\n');
+            }
+        }
+
+        // Add type definitions with proper indentation
         if !relevant_defs.is_empty() {
             content.push('\n'); // Separator
             debug!(count=%relevant_defs.len(), "Adding type definitions to interface");
-            content.push_str(&relevant_defs.join("\n\n"));
+            // Indent each type definition by 4 spaces
+            let indented_defs: Vec<String> = relevant_defs
+                .iter()
+                .map(|def| {
+                    def.lines()
+                        .map(|line| {
+                            if line.is_empty() {
+                                line.to_string()
+                            } else {
+                                format!("    {}", line)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .collect();
+            content.push_str(&indented_defs.join("\n\n"));
             content.push('\n');
         }
 
-        // Add signature structs
+        // Add signature structs with proper indentation
         if !signature_structs.is_empty() {
             content.push('\n'); // Separator
             debug!(count=%signature_structs.len(), "Adding signature structs to interface");
+            // Signature structs are already indented, just join them
             content.push_str(&signature_structs.join("\n\n"));
         }
 
@@ -1273,7 +1771,9 @@ fn rewrite_wit(
     }
 
     // handle non-existing api files
-    for wit_world in wit_worlds.iter() {
+    let mut wit_worlds_sorted: Vec<_> = wit_worlds.iter().collect();
+    wit_worlds_sorted.sort();
+    for wit_world in wit_worlds_sorted {
         for prefix in ["", "types-"] {
             let wit_world = format!("{prefix}{wit_world}");
             let world_content =
@@ -1292,6 +1792,426 @@ fn rewrite_wit(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_only_collects_used_types() -> Result<()> {
+        // Create a temporary directory for the test
+        let temp_dir = TempDir::new()?;
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir)?;
+
+        // Create a lib.rs with a handler that uses SimpleStruct but not UnusedStruct
+        let lib_content = r#"
+use hyperware_macros::hyperapp;
+
+pub struct SimpleStruct {
+    pub name: String,
+    pub value: u32,
+}
+
+// This struct has incompatible enum variant but shouldn't be processed
+pub enum UnusedEnum {
+    Variant1 { data: Vec<u8> },  // Struct-like variant - would fail if processed
+    Variant2(String),
+}
+
+pub struct ProcessState;
+
+#[hyperapp(wit_world = "test-world")]
+impl ProcessState {
+    #[remote]
+    pub fn handler(&self, input: SimpleStruct) -> Result<String, String> {
+        Ok("done".to_string())
+    }
+}
+"#;
+        fs::write(src_dir.join("lib.rs"), lib_content)?;
+
+        // Create a Cargo.toml
+        let cargo_content = r#"
+[package]
+name = "test-project"
+version = "0.1.0"
+
+[package.metadata.component]
+package = "test:component"
+"#;
+        fs::write(temp_dir.path().join("Cargo.toml"), cargo_content)?;
+
+        // Create the api directory
+        let api_dir = temp_dir.path().join("api");
+        fs::create_dir_all(&api_dir)?;
+
+        // Run the WIT generator
+        let result = process_rust_project(temp_dir.path(), &api_dir);
+
+        // Debug: Check what files were created
+        eprintln!("Test directory: {:?}", temp_dir.path());
+        eprintln!("Files in src/:");
+        for entry in fs::read_dir(src_dir.clone()).unwrap() {
+            let entry = entry.unwrap();
+            eprintln!("  - {:?}", entry.file_name());
+        }
+
+        // The generation should succeed because UnusedEnum is never processed
+        assert!(
+            result.is_ok(),
+            "WIT generation should succeed when unused types have incompatible variants"
+        );
+
+        // Check that the generated interface file exists and contains SimpleStruct but not UnusedEnum
+        let interface_files: Vec<_> = fs::read_dir(&api_dir)?
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext == "wit")
+                    .unwrap_or(false)
+                    && entry
+                        .file_name()
+                        .to_str()
+                        .map(|name| name != "test-world.wit" && name != "types-test-world.wit")
+                        .unwrap_or(false)
+            })
+            .collect();
+
+        assert!(
+            !interface_files.is_empty(),
+            "Should generate at least one interface file"
+        );
+
+        let interface_content = fs::read_to_string(interface_files[0].path())?;
+        assert!(
+            interface_content.contains("simple-struct"),
+            "Should contain SimpleStruct"
+        );
+        assert!(
+            !interface_content.contains("unused-enum"),
+            "Should not contain UnusedEnum"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_collects_recursive_dependencies() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir)?;
+
+        // Create a lib.rs with nested type dependencies
+        let lib_content = r#"
+use hyperware_macros::hyperapp;
+
+pub struct LevelOne {
+    pub data: LevelTwo,
+}
+
+pub struct LevelTwo {
+    pub items: Vec<LevelThree>,
+}
+
+pub struct LevelThree {
+    pub value: String,
+}
+
+pub struct UnusedDeep {
+    pub field: String,
+}
+
+pub struct ProcessState;
+
+#[hyperapp(wit_world = "test-world")]
+impl ProcessState {
+    #[remote]
+    pub fn handler(&self, input: LevelOne) -> Result<(), String> {
+        Ok(())
+    }
+}
+"#;
+        fs::write(src_dir.join("lib.rs"), lib_content)?;
+
+        let cargo_content = r#"
+[package]
+name = "test-project"
+version = "0.1.0"
+
+[package.metadata.component]
+package = "test:component"
+"#;
+        fs::write(temp_dir.path().join("Cargo.toml"), cargo_content)?;
+
+        // Create the api directory
+        let api_dir = temp_dir.path().join("api");
+        fs::create_dir_all(&api_dir)?;
+
+        let result = process_rust_project(temp_dir.path(), &api_dir);
+
+        assert!(
+            result.is_ok(),
+            "Should successfully process recursive dependencies"
+        );
+
+        // Find the generated interface file
+        let interface_files: Vec<_> = fs::read_dir(&api_dir)?
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext == "wit")
+                    .unwrap_or(false)
+                    && entry
+                        .file_name()
+                        .to_str()
+                        .map(|name| name != "test-world.wit" && name != "types-test-world.wit")
+                        .unwrap_or(false)
+            })
+            .collect();
+
+        let interface_content = fs::read_to_string(interface_files[0].path())?;
+
+        // Should contain all three levels of dependencies
+        assert!(
+            interface_content.contains("level-one"),
+            "Should contain LevelOne"
+        );
+        assert!(
+            interface_content.contains("level-two"),
+            "Should contain LevelTwo"
+        );
+        assert!(
+            interface_content.contains("level-three"),
+            "Should contain LevelThree"
+        );
+
+        // Should not contain unused types
+        assert!(
+            !interface_content.contains("unused-deep"),
+            "Should not contain UnusedDeep"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_fails_on_incompatible_used_type() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir)?;
+
+        // Create a lib.rs with a handler that uses an incompatible enum
+        let lib_content = r#"
+use hyperware_macros::hyperapp;
+
+pub enum BadEnum {
+    Variant { name: String, count: u32 },  // Struct-like variant - should fail
+}
+
+pub struct ProcessState;
+
+#[hyperapp(wit_world = "test-world")]
+impl ProcessState {
+    #[remote]
+    pub fn handler(&self, input: BadEnum) -> Result<(), String> {
+        Ok(())
+    }
+}
+"#;
+        fs::write(src_dir.join("lib.rs"), lib_content)?;
+
+        let cargo_content = r#"
+[package]
+name = "test-project"
+version = "0.1.0"
+
+[package.metadata.component]
+package = "test:component"
+"#;
+        fs::write(temp_dir.path().join("Cargo.toml"), cargo_content)?;
+
+        // Create the api directory
+        let api_dir = temp_dir.path().join("api");
+        fs::create_dir_all(&api_dir)?;
+
+        let result = process_rust_project(temp_dir.path(), &api_dir);
+
+        // Should fail because BadEnum is used and has incompatible variant
+        assert!(
+            result.is_err(),
+            "Should fail when used type has incompatible variant"
+        );
+
+        let error_msg = result.unwrap_err().to_string();
+        assert!(
+            error_msg.contains("struct-like fields"),
+            "Error should mention struct-like fields"
+        );
+        assert!(
+            error_msg.contains("BadEnum"),
+            "Error should mention the problematic enum name"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_clear_error_message_for_illegal_field_names() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir)?;
+
+        // Create a lib.rs with a struct that has fields with numbers
+        let lib_content = r#"
+use hyperware_macros::hyperapp;
+
+pub struct TestStruct {
+    pub field1: String,  // This will trigger the error
+    pub data2: u32,      // This too
+}
+
+pub struct ProcessState;
+
+#[hyperapp(wit_world = "test-world")]
+impl ProcessState {
+    #[remote]
+    pub fn handler(&self, input: TestStruct) -> Result<(), String> {
+        Ok(())
+    }
+}
+"#;
+        fs::write(src_dir.join("lib.rs"), lib_content)?;
+
+        let cargo_content = r#"
+[package]
+name = "test-project"
+version = "0.1.0"
+
+[package.metadata.component]
+package = "test:component"
+"#;
+        fs::write(temp_dir.path().join("Cargo.toml"), cargo_content)?;
+
+        // Create the api directory
+        let api_dir = temp_dir.path().join("api");
+        fs::create_dir_all(&api_dir)?;
+
+        let result = process_rust_project(temp_dir.path(), &api_dir);
+
+        // Should fail with our improved error message
+        assert!(
+            result.is_err(),
+            "Should fail when field names contain numbers"
+        );
+
+        let error_msg = result.unwrap_err().to_string();
+
+        // Check that the error message contains our helpful information
+        assert!(
+            error_msg.contains("contains numbers, which are not allowed in WIT identifiers"),
+            "Error should explain that numbers are not allowed"
+        );
+        assert!(
+            error_msg.contains("WIT (WebAssembly Interface Types) has strict naming rules"),
+            "Error should mention WIT naming rules"
+        );
+        assert!(
+            error_msg.contains("Suggestion: Rename"),
+            "Error should provide suggestions"
+        );
+        assert!(
+            error_msg.contains("field1"),
+            "Error should mention the problematic field name"
+        );
+        assert!(
+            error_msg.contains("Examples:"),
+            "Error should provide examples of how to fix"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_clear_error_message_for_stream_keyword() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir)?;
+
+        // Create a lib.rs with a struct that has 'stream' in the name
+        let lib_content = r#"
+use hyperware_macros::hyperapp;
+
+pub struct DataStream {  // This will trigger the error
+    pub data: String,
+}
+
+pub struct ProcessState;
+
+#[hyperapp(wit_world = "test-world")]
+impl ProcessState {
+    #[remote]
+    pub fn handler(&self, input: DataStream) -> Result<(), String> {
+        Ok(())
+    }
+}
+"#;
+        fs::write(src_dir.join("lib.rs"), lib_content)?;
+
+        let cargo_content = r#"
+[package]
+name = "test-project"
+version = "0.1.0"
+
+[package.metadata.component]
+package = "test:component"
+"#;
+        fs::write(temp_dir.path().join("Cargo.toml"), cargo_content)?;
+
+        // Create the api directory
+        let api_dir = temp_dir.path().join("api");
+        fs::create_dir_all(&api_dir)?;
+
+        let result = process_rust_project(temp_dir.path(), &api_dir);
+
+        // Should fail with our improved error message
+        assert!(result.is_err(), "Should fail when name contains 'stream'");
+
+        let error_msg = result.unwrap_err().to_string();
+
+        // Check that the error message contains our helpful information
+        assert!(
+            error_msg.contains("contains 'stream', which is a reserved keyword in WIT"),
+            "Error should explain that 'stream' is reserved"
+        );
+        assert!(
+            error_msg.contains("'stream' is reserved for future WIT streaming functionality"),
+            "Error should explain why stream is reserved"
+        );
+        assert!(
+            error_msg.contains("Suggestion: Use an alternative term"),
+            "Error should provide alternatives"
+        );
+        assert!(
+            error_msg.contains("DataStream"),
+            "Error should mention the problematic type name"
+        );
+        assert!(
+            error_msg.contains("flow"),
+            "Error should suggest 'flow' as an alternative"
+        );
+
+        Ok(())
+    }
 }
 
 fn generate_wit_file(
@@ -1338,7 +2258,12 @@ fn generate_wit_file(
     let imports_section = all_imports_with_indent.join("\n");
 
     // Create updated world content with proper indentation
-    let include_lines: String = include_lines.iter().map(|l| format!("    {l}\n")).collect();
+    let mut include_lines_sorted: Vec<_> = include_lines.iter().collect();
+    include_lines_sorted.sort();
+    let include_lines: String = include_lines_sorted
+        .iter()
+        .map(|l| format!("    {l}\n"))
+        .collect();
     let world_content = format!("world {world_name} {{\n{imports_section}\n{include_lines}}}");
 
     return Ok(world_content);
@@ -1382,9 +2307,9 @@ pub fn generate_wit_files(base_dir: &Path, api_dir: &Path) -> Result<(Vec<PathBu
                 processed_projects.push(project_path.clone());
                 wit_worlds.insert(wit_world);
             }
-            // Project was skipped intentionally (e.g., no lib.rs, no #[hyperprocess])
+            // Project was skipped intentionally (e.g., no lib.rs, no #[hyperapp])
             Ok(None) => {
-                debug!(project = %project_path.display(), "Project skipped during processing (e.g., no lib.rs or #[hyperprocess] found)");
+                debug!(project = %project_path.display(), "Project skipped during processing (e.g., no lib.rs or #[hyperapp] found)");
                 // Continue to the next project
                 continue;
             }
