@@ -478,7 +478,7 @@ fn install_deps(deps: Vec<Dependency>, verbose: bool, toolchain: &str) -> Result
                 call_rustup("target add wasm32-wasip1", verbose, toolchain)?
             }
             Dependency::WasmTools => call_cargo(
-                &format!("install wasm-tools --version {WASM_TOOLS_VERSION}"),
+                &format!("install wasm-tools --locked --version {WASM_TOOLS_VERSION}"),
                 verbose,
                 toolchain,
             )?,
