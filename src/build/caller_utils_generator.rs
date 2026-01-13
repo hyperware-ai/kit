@@ -254,42 +254,80 @@ struct SignatureStruct {
     args_comment: Option<String>, // Parsed from // args: (name: type, ...) comment
 }
 
-// Find all interface imports in the world WIT file
+// Find all interface imports in the selected world WIT file(s)
 #[instrument(level = "trace", skip_all)]
-fn find_interfaces_in_world(api_dir: &Path) -> Result<Vec<String>> {
-    debug!(dir = ?api_dir, "Finding interface imports in world definitions");
-    let mut interfaces = Vec::new();
+fn find_interfaces_in_world(api_dir: &Path, world_name: &str) -> Result<Vec<String>> {
+    debug!(dir = ?api_dir, world = %world_name, "Finding interface imports in world definitions");
+    let mut world_defs: HashMap<String, String> = HashMap::new();
 
-    // Find world definition files
+    // Index world definition files by world name
     for entry in WalkDir::new(api_dir)
         .max_depth(1)
         .into_iter()
         .filter_map(Result::ok)
     {
         let path = entry.path();
+        if !(path.is_file() && path.extension().map_or(false, |ext| ext == "wit")) {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(path) else {
+            continue;
+        };
+        if !content.contains("world ") {
+            continue;
+        }
+        let world_name = content
+            .lines()
+            .find(|line| line.trim().starts_with("world "))
+            .and_then(|world_line| world_line.trim().split_whitespace().nth(1))
+            .map(|name| {
+                name.trim_end_matches(" {")
+                    .trim_start_matches('%')
+                    .to_string()
+            });
+        if let Some(clean_name) = world_name {
+            world_defs.insert(clean_name.clone(), content);
+            debug!(file = %path.display(), world = %clean_name, "Indexed world definition");
+        }
+    }
 
-        if path.is_file() && path.extension().map_or(false, |ext| ext == "wit") {
-            if let Ok(content) = fs::read_to_string(path) {
-                if content.contains("world ") {
-                    debug!(file = %path.display(), "Analyzing world definition file for imports");
+    let mut interfaces = Vec::new();
+    let mut visited = std::collections::HashSet::new();
+    let mut stack = vec![world_name.to_string()];
 
-                    // Extract import statements
-                    for line in content.lines() {
-                        let line = line.trim();
-                        if line.starts_with("import ") && line.ends_with(";") {
-                            let interface = line
-                                .trim_start_matches("import ")
-                                .trim_end_matches(";")
-                                .trim();
+    while let Some(current_world) = stack.pop() {
+        let clean_world = current_world.trim_start_matches('%').to_string();
+        if !visited.insert(clean_world.clone()) {
+            continue;
+        }
+        let Some(content) = world_defs.get(&clean_world) else {
+            debug!(world = %clean_world, "World definition not found for imports");
+            continue;
+        };
 
-                            interfaces.push(interface.to_string());
-                            debug!(interface = %interface, "Found interface import");
-                        }
-                    }
-                }
+        debug!(world = %clean_world, "Analyzing world definition file for imports");
+        for line in content.lines() {
+            let line = line.trim();
+            if line.starts_with("import ") && line.ends_with(';') {
+                let interface = line
+                    .trim_start_matches("import ")
+                    .trim_end_matches(';')
+                    .trim()
+                    .trim_start_matches('%');
+                interfaces.push(interface.to_string());
+                debug!(interface = %interface, "Found interface import");
+            } else if line.starts_with("include ") && line.ends_with(';') {
+                let include_world = line
+                    .trim_start_matches("include ")
+                    .trim_end_matches(';')
+                    .trim()
+                    .trim_start_matches('%')
+                    .to_string();
+                stack.push(include_world);
             }
         }
     }
+
     debug!(count = interfaces.len(), interfaces = ?interfaces, "Found interface imports");
     Ok(interfaces)
 }
@@ -450,8 +488,8 @@ fn generate_async_function(signature: &SignatureStruct) -> Option<String> {
             if field.wit_type == "string" {
                 target_param = "&str";
             } else {
-                // Use hyperware_process_lib::Address instead of WitAddress
-                target_param = "&Address";
+                // Use a distinct alias for hyperware_process_lib::Address to avoid WIT name clashes
+                target_param = "&ProcessAddress";
             }
         } else if field.name == "returning" {
             return_type = rust_type;
@@ -620,8 +658,8 @@ crate-type = ["cdylib", "lib"]
         "types"
     };
 
-    // Get all interfaces from the world file
-    let interface_imports = find_interfaces_in_world(api_dir)?;
+    // Get all interfaces from the selected world
+    let interface_imports = find_interfaces_in_world(api_dir, world_name)?;
 
     // Store all types from each interface
     let mut interface_types: HashMap<String, Vec<String>> = HashMap::new();
@@ -638,8 +676,17 @@ crate-type = ["cdylib", "lib"]
             // Exclude world definition files
             if let Ok(content) = fs::read_to_string(path) {
                 if !content.contains("world ") {
-                    debug!(file = %path.display(), "Adding WIT file for parsing");
-                    wit_files.push(path.to_path_buf());
+                    let interface_name = path.file_stem().unwrap().to_string_lossy();
+                    let interface_name = interface_name.trim_start_matches('%');
+                    if interface_imports
+                        .iter()
+                        .any(|i| i.trim_start_matches('%') == interface_name)
+                    {
+                        debug!(file = %path.display(), "Adding WIT file for parsing");
+                        wit_files.push(path.to_path_buf());
+                    } else {
+                        debug!(file = %path.display(), "Skipping WIT file not in selected world");
+                    }
                 } else {
                     debug!(file = %path.display(), "Skipping world definition WIT file");
                 }
@@ -735,7 +782,7 @@ crate-type = ["cdylib", "lib"]
     // Add global imports
     lib_rs.push_str("pub use hyperware_process_lib::hyperapp::AppSendError;\n");
     lib_rs.push_str("pub use hyperware_process_lib::hyperapp::send;\n");
-    lib_rs.push_str("pub use hyperware_process_lib::{Address, Request};\n");
+    lib_rs.push_str("pub use hyperware_process_lib::{Address as ProcessAddress, Request};\n");
     lib_rs.push_str("use serde_json::json;\n\n");
 
     // Add interface use statements
