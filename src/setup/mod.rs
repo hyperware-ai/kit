@@ -20,7 +20,7 @@ const MINIMUM_NPM_MINOR: u32 = 0;
 pub const REQUIRED_PY_MAJOR: u32 = 3;
 pub const MINIMUM_PY_MINOR: u32 = 10;
 pub const REQUIRED_PY_PACKAGE: &str = "componentize-py==0.11.0";
-const WASM_TOOLS_VERSION: &str = "v1.225.0";
+const WASM_TOOLS_VERSION: &str = "1.225.0";
 
 #[derive(Clone)]
 pub enum Dependency {
