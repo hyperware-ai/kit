@@ -96,3 +96,29 @@ NodeJS (v18 or higher) and NPM are required to build and develop the UI.
 The UI is written in React with Vite as the bundler + reloader.
 
 To use `npm start` instead of `npm run dev`, use `kit dev-ui --release`.
+
+## Appendix: Deps for Debian/Ubuntu
+
+```bash
+apt update
+DEBIAN_FRONTEND=noninteractive apt install -y curl git build-essential pkg-config libssl-dev libclang-dev python3 python3-venv
+
+curl https://sh.rustup.rs -sSf | sh -s -- -y
+. ~/.bashrc
+cargo install --git https://github.com/hyperware-ai/kit --locked
+kit setup -d --non-interactive
+. ~/.bashrc
+```
+
+## Appendix: Deps for macOS
+
+```bash
+xcode-select --install
+brew install pkg-config llvm openssl@3 python@3.12 libusb
+
+curl https://sh.rustup.rs -sSf | sh -s -- -y
+. ~/.bashrc
+cargo install --git https://github.com/hyperware-ai/kit --locked
+kit setup -d --non-interactive
+. ~/.bashrc
+```

@@ -20,6 +20,7 @@ const MINIMUM_NPM_MINOR: u32 = 0;
 pub const REQUIRED_PY_MAJOR: u32 = 3;
 pub const MINIMUM_PY_MINOR: u32 = 10;
 pub const REQUIRED_PY_PACKAGE: &str = "componentize-py==0.11.0";
+const WASM_TOOLS_VERSION: &str = "1.225.0";
 
 #[derive(Clone)]
 pub enum Dependency {
@@ -476,7 +477,11 @@ fn install_deps(deps: Vec<Dependency>, verbose: bool, toolchain: &str) -> Result
             Dependency::RustWasm32Wasi => {
                 call_rustup("target add wasm32-wasip1", verbose, toolchain)?
             }
-            Dependency::WasmTools => call_cargo("install wasm-tools", verbose, toolchain)?,
+            Dependency::WasmTools => call_cargo(
+                &format!("install wasm-tools --locked --version {WASM_TOOLS_VERSION}"),
+                verbose,
+                toolchain,
+            )?,
             Dependency::Foundry => install_foundry(verbose)?,
             Dependency::Docker => {}
         }
